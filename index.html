@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GrandRoot — Inteligencia desde la raíz</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav class="nav" id="nav">
+    <div class="nav__logo">
+      <span class="nav__logo-mark">GR</span>
+      <span class="nav__logo-text">GrandRoot</span>
+    </div>
+    <ul class="nav__links">
+      <li><a href="#product">Producto</a></li>
+      <li><a href="#technology">Tecnología</a></li>
+      <li><a href="#experience">Experiencia</a></li>
+      <li><a href="#benefits">Beneficios</a></li>
+    </ul>
+    <a href="#cta" class="btn btn--outline btn--sm">Solicitar demo</a>
+    <button class="nav__hamburger" id="hamburger" aria-label="Menú">
+      <span></span><span></span><span></span>
+    </button>
+  </nav>
+
+  <!-- MOBILE MENU -->
+  <div class="mobile-menu" id="mobileMenu">
+    <ul>
+      <li><a href="#product" class="mobile-link">Producto</a></li>
+      <li><a href="#technology" class="mobile-link">Tecnología</a></li>
+      <li><a href="#experience" class="mobile-link">Experiencia</a></li>
+      <li><a href="#benefits" class="mobile-link">Beneficios</a></li>
+      <li><a href="#cta" class="mobile-link">Solicitar demo</a></li>
+    </ul>
+  </div>
+
+  <!-- HERO -->
+  <section class="hero" id="hero">
+    <div class="hero__bg">
+      <div class="hero__grid-overlay"></div>
+      <div class="hero__particles" id="particles"></div>
+      <!-- Animated field lines -->
+      <div class="hero__field-lines">
+        <div class="field-line" style="--delay:0s;--left:10%"></div>
+        <div class="field-line" style="--delay:0.4s;--left:25%"></div>
+        <div class="field-line" style="--delay:0.8s;--left:45%"></div>
+        <div class="field-line" style="--delay:1.2s;--left:65%"></div>
+        <div class="field-line" style="--delay:1.6s;--left:82%"></div>
+      </div>
+    </div>
+    <div class="hero__robot-visual">
+      <div class="robot-frame">
+        <div class="robot-body">
+          <div class="robot-chassis">
+            <div class="robot-panel robot-panel--top">
+              <div class="robot-panel__inner">
+                <div class="sensor-array">
+                  <div class="sensor sensor--camera"></div>
+                  <div class="sensor sensor--lidar"></div>
+                  <div class="sensor sensor--camera"></div>
+                </div>
+                <div class="antenna"></div>
+              </div>
+            </div>
+            <div class="robot-panel robot-panel--mid">
+              <div class="robot-screen">
+                <div class="screen-data">
+                  <div class="data-line" style="--w:70%"></div>
+                  <div class="data-line" style="--w:45%"></div>
+                  <div class="data-line" style="--w:90%"></div>
+                  <div class="data-bar-group">
+                    <div class="data-bar" style="--h:60%"></div>
+                    <div class="data-bar" style="--h:80%"></div>
+                    <div class="data-bar" style="--h:45%"></div>
+                    <div class="data-bar" style="--h:95%"></div>
+                    <div class="data-bar" style="--h:70%"></div>
+                  </div>
+                  <div class="scan-line"></div>
+                </div>
+              </div>
+              <div class="robot-logo-embed">GR</div>
+            </div>
+          </div>
+          <div class="robot-wheel-axle">
+            <div class="robot-wheel robot-wheel--left">
+              <div class="wheel-spoke"></div>
+              <div class="wheel-spoke"></div>
+              <div class="wheel-spoke"></div>
+            </div>
+            <div class="robot-underbody">
+              <div class="underbody-sensor"></div>
+              <div class="underbody-sensor"></div>
+              <div class="underbody-sensor"></div>
+            </div>
+            <div class="robot-wheel robot-wheel--right">
+              <div class="wheel-spoke"></div>
+              <div class="wheel-spoke"></div>
+              <div class="wheel-spoke"></div>
+            </div>
+          </div>
+        </div>
+        <div class="robot-shadow"></div>
+        <!-- Scan beam -->
+        <div class="scan-beam"></div>
+        <!-- Data nodes -->
+        <div class="data-node" style="--x:20%;--y:30%"><span>N₂</span></div>
+        <div class="data-node" style="--x:80%;--y:25%"><span>pH</span></div>
+        <div class="data-node" style="--x:15%;--y:70%"><span>H₂O</span></div>
+        <div class="data-node" style="--x:85%;--y:65%"><span>AI</span></div>
+      </div>
+    </div>
+    <div class="hero__content reveal">
+      <div class="hero__eyebrow">Agricultura Autónoma · 2025</div>
+      <h1 class="hero__title">
+        GrandRoot<span class="accent">.</span>
+      </h1>
+      <p class="hero__subtitle">Inteligencia desde la raíz</p>
+      <p class="hero__desc">
+        El futuro de la agricultura autónoma comienza bajo tus pies
+      </p>
+      <div class="hero__cta">
+        <a href="#product" class="btn btn--primary">Explorar</a>
+        <a href="#cta" class="btn btn--ghost">Solicitar demo <span class="btn__arrow">→</span></a>
+      </div>
+    </div>
+    <div class="hero__scroll-indicator">
+      <span>Descubrir</span>
+      <div class="scroll-line"></div>
+    </div>
+  </section>
+
+  <!-- STORYTELLING -->
+  <section class="story" id="story">
+    <div class="story__container">
+      <div class="story__block reveal">
+        <span class="story__label">El problema</span>
+        <h2 class="story__headline">Todo comienza<br/>con un problema.</h2>
+      </div>
+      <div class="story__cards">
+        <div class="story__card reveal" style="--delay:0s">
+          <div class="story__card-icon">
+            <svg viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="20" stroke="currentColor" stroke-width="1.5"/><path d="M16 24h16M24 16v16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </div>
+          <h3>Análisis lento</h3>
+          <p>Los métodos tradicionales de análisis de suelo tardan semanas. El campo no espera.</p>
+        </div>
+        <div class="story__card reveal" style="--delay:0.15s">
+          <div class="story__card-icon">
+            <svg viewBox="0 0 48 48" fill="none"><rect x="8" y="16" width="32" height="20" rx="3" stroke="currentColor" stroke-width="1.5"/><path d="M16 12h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="24" cy="26" r="4" stroke="currentColor" stroke-width="1.5"/></svg>
+          </div>
+          <h3>Decisiones ciegas</h3>
+          <p>Sin datos precisos en tiempo real, los agricultores arriesgan cosechas enteras.</p>
+        </div>
+        <div class="story__card reveal" style="--delay:0.3s">
+          <div class="story__card-icon">
+            <svg viewBox="0 0 48 48" fill="none"><path d="M24 8L8 20v20h32V20L24 8z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M20 40V28h8v12" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          </div>
+          <h3>Recursos malgastados</h3>
+          <p>Agua, fertilizantes y tiempo se pierden por falta de inteligencia aplicada al suelo.</p>
+        </div>
+      </div>
+      <div class="story__transition reveal">
+        <div class="story__transition-line"></div>
+        <p class="story__transition-text">Luego llegó GrandRoot.</p>
+        <div class="story__transition-line"></div>
+      </div>
+      <div class="story__solution reveal">
+        <p class="story__solution-text">
+          Un carrito autónomo inteligente que recorre el campo, <strong>analiza el suelo en tiempo real</strong> y convierte datos en decisiones. No sustituye al agricultor — lo convierte en el más informado del mundo.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRODUCT SPECS -->
+  <section class="product" id="product">
+    <div class="product__header reveal">
+      <span class="section-label">El vehículo</span>
+      <h2 class="section-title">Diseñado para<br/>el campo del futuro.</h2>
+    </div>
+
+    <div class="product__showcase">
+      <!-- Central 3D-like robot display -->
+      <div class="product__robot-display reveal">
+        <div class="product-robot-3d">
+          <div class="pr3d__body">
+            <div class="pr3d__top-unit">
+              <div class="pr3d__sensor-bar">
+                <div class="pr3d__sensor pr3d__sensor--cam"></div>
+                <div class="pr3d__sensor pr3d__sensor--lidar" id="lidarSpin"></div>
+                <div class="pr3d__sensor pr3d__sensor--cam"></div>
+              </div>
+              <div class="pr3d__antenna-group">
+                <div class="pr3d__antenna pr3d__antenna--tall"></div>
+                <div class="pr3d__antenna pr3d__antenna--short"></div>
+              </div>
+            </div>
+            <div class="pr3d__mid-unit">
+              <div class="pr3d__display">
+                <div class="pr3d__display-inner">
+                  <div class="pr3d__chart">
+                    <div class="pr3d__chart-bar" style="--val:65%"></div>
+                    <div class="pr3d__chart-bar" style="--val:80%"></div>
+                    <div class="pr3d__chart-bar" style="--val:50%"></div>
+                    <div class="pr3d__chart-bar" style="--val:95%"></div>
+                    <div class="pr3d__chart-bar" style="--val:72%"></div>
+                    <div class="pr3d__chart-bar" style="--val:88%"></div>
+                  </div>
+                  <div class="pr3d__scan-pulse"></div>
+                </div>
+              </div>
+              <div class="pr3d__side-vents">
+                <div class="pr3d__vent"></div>
+                <div class="pr3d__vent"></div>
+                <div class="pr3d__vent"></div>
+              </div>
+            </div>
+            <div class="pr3d__bottom-unit">
+              <div class="pr3d__wheel pr3d__wheel--fl"><div class="pr3d__tread"></div></div>
+              <div class="pr3d__chassis-base">
+                <div class="pr3d__ground-sensor"></div>
+                <div class="pr3d__ground-sensor"></div>
+                <div class="pr3d__ground-sensor"></div>
+                <div class="pr3d__ground-sensor"></div>
+              </div>
+              <div class="pr3d__wheel pr3d__wheel--fr"><div class="pr3d__tread"></div></div>
+            </div>
+          </div>
+          <div class="pr3d__glow"></div>
+          <div class="pr3d__ground-shadow"></div>
+          <!-- Orbiting specs -->
+          <div class="pr3d__orbit-ring pr3d__orbit-ring--1">
+            <div class="pr3d__orbit-dot">
+              <div class="pr3d__orbit-label">Cámara RGB</div>
+            </div>
+          </div>
+          <div class="pr3d__orbit-ring pr3d__orbit-ring--2">
+            <div class="pr3d__orbit-dot">
+              <div class="pr3d__orbit-label">LiDAR 360°</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="product__specs-grid">
+        <div class="spec-card reveal" style="--delay:0s">
+          <div class="spec-card__number">01</div>
+          <h3 class="spec-card__title">Navegación Autónoma</h3>
+          <p class="spec-card__desc">Mapeo SLAM en tiempo real. Recorre filas de cultivo con precisión milimétrica sin intervención humana.</p>
+          <div class="spec-card__bar"><div class="spec-card__bar-fill" style="--pct:92%"></div></div>
+          <span class="spec-card__stat">92% precisión de ruta</span>
+        </div>
+        <div class="spec-card reveal" style="--delay:0.1s">
+          <div class="spec-card__number">02</div>
+          <h3 class="spec-card__title">Sensores Inteligentes</h3>
+          <p class="spec-card__desc">Matriz de 12 sensores: humedad, temperatura, pH, nutrientes, luz UV y más. Lectura cada 500ms.</p>
+          <div class="spec-card__bar"><div class="spec-card__bar-fill" style="--pct:98%"></div></div>
+          <span class="spec-card__stat">12 parámetros simultáneos</span>
+        </div>
+        <div class="spec-card reveal" style="--delay:0.2s">
+          <div class="spec-card__number">03</div>
+          <h3 class="spec-card__title">Análisis en Tiempo Real</h3>
+          <p class="spec-card__desc">Motor de IA embebido procesa y clasifica datos de suelo al instante. Sin latencia. Sin esperas.</p>
+          <div class="spec-card__bar"><div class="spec-card__bar-fill" style="--pct:85%"></div></div>
+          <span class="spec-card__stat">&lt;500ms por análisis</span>
+        </div>
+        <div class="spec-card reveal" style="--delay:0.3s">
+          <div class="spec-card__number">04</div>
+          <h3 class="spec-card__title">Arquitectura Modular</h3>
+          <p class="spec-card__desc">Diseño intercambiable. Adapta los módulos de sensores según el cultivo, la temporada o las necesidades.</p>
+          <div class="spec-card__bar"><div class="spec-card__bar-fill" style="--pct:100%"></div></div>
+          <span class="spec-card__stat">Plug & play modular</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TECHNOLOGY -->
+  <section class="technology" id="technology">
+    <div class="technology__bg-lines">
+      <div class="tech-line" style="--i:1"></div>
+      <div class="tech-line" style="--i:2"></div>
+      <div class="tech-line" style="--i:3"></div>
+      <div class="tech-line" style="--i:4"></div>
+    </div>
+    <div class="technology__container">
+      <div class="technology__header reveal">
+        <span class="section-label">Ingeniería de precisión</span>
+        <h2 class="section-title">La tecnología<br/>detrás del campo.</h2>
+      </div>
+      <div class="technology__stack">
+        <div class="tech-pillar reveal" style="--delay:0s">
+          <div class="tech-pillar__icon">
+            <svg viewBox="0 0 64 64" fill="none">
+              <circle cx="32" cy="32" r="28" stroke="#00C853" stroke-width="1" stroke-dasharray="4 4"/>
+              <circle cx="32" cy="32" r="16" stroke="#00C853" stroke-width="1.5"/>
+              <circle cx="32" cy="32" r="6" fill="#00C853" opacity="0.3"/>
+              <circle cx="32" cy="32" r="3" fill="#00C853"/>
+              <path d="M32 4v8M32 52v8M4 32h8M52 32h8" stroke="#00C853" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <h3>Sensórica Avanzada</h3>
+          <p>Cámaras RGB de alta resolución, sensores de humedad capacitivos, espectrometría de suelo y LiDAR 360° integrados en un solo sistema.</p>
+          <ul class="tech-list">
+            <li>Cámara RGB 4K</li>
+            <li>Sensor humedad ±1%</li>
+            <li>Espectrometría NIR</li>
+            <li>LiDAR 16 canales</li>
+          </ul>
+        </div>
+        <div class="tech-pillar reveal" style="--delay:0.15s">
+          <div class="tech-pillar__icon">
+            <svg viewBox="0 0 64 64" fill="none">
+              <rect x="12" y="20" width="40" height="28" rx="4" stroke="#00C853" stroke-width="1.5"/>
+              <path d="M20 12h24l4 8H16l4-8z" stroke="#00C853" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M26 34l4 4 8-8" stroke="#00C853" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="44" cy="16" r="3" fill="#00C853" opacity="0.6" class="pulse-dot"/>
+            </svg>
+          </div>
+          <h3>Inteligencia Artificial</h3>
+          <p>Modelos de ML entrenados con miles de muestras de suelo. Clasificación de cultivos, detección de deficiencias y predicción de rendimiento.</p>
+          <ul class="tech-list">
+            <li>Red neuronal embebida</li>
+            <li>Clasificación de suelo</li>
+            <li>Predicción de cosecha</li>
+            <li>Aprendizaje continuo</li>
+          </ul>
+        </div>
+        <div class="tech-pillar reveal" style="--delay:0.3s">
+          <div class="tech-pillar__icon">
+            <svg viewBox="0 0 64 64" fill="none">
+              <path d="M32 8L8 20v24l24 12 24-12V20L32 8z" stroke="#00C853" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M32 8v36M8 20l24 12 24-12" stroke="#00C853" stroke-width="1" opacity="0.4"/>
+              <circle cx="32" cy="32" r="5" stroke="#00C853" stroke-width="1.5"/>
+            </svg>
+          </div>
+          <h3>Sistema de Control</h3>
+          <p>Unidad central de procesamiento con conectividad 4G/WiFi, sincronización en la nube y dashboard en tiempo real accesible desde cualquier dispositivo.</p>
+          <ul class="tech-list">
+            <li>MCU de alto rendimiento</li>
+            <li>4G / WiFi / BLE</li>
+            <li>Cloud sync continuo</li>
+            <li>API REST abierta</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Architecture diagram -->
+      <div class="tech-diagram reveal">
+        <div class="tech-diagram__title">Arquitectura del sistema</div>
+        <div class="tech-diagram__flow">
+          <div class="td-node td-node--sensor">
+            <div class="td-node__icon">⬡</div>
+            <span>Sensores</span>
+          </div>
+          <div class="td-arrow"><div class="td-arrow__line"></div></div>
+          <div class="td-node td-node--cpu">
+            <div class="td-node__icon">◈</div>
+            <span>IA Local</span>
+          </div>
+          <div class="td-arrow"><div class="td-arrow__line"></div></div>
+          <div class="td-node td-node--cloud">
+            <div class="td-node__icon">◎</div>
+            <span>Nube</span>
+          </div>
+          <div class="td-arrow"><div class="td-arrow__line"></div></div>
+          <div class="td-node td-node--dash">
+            <div class="td-node__icon">▦</div>
+            <span>Dashboard</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- EXPERIENCE -->
+  <section class="experience" id="experience">
+    <div class="experience__container">
+      <div class="experience__header reveal">
+        <span class="section-label">Experiencia de uso</span>
+        <h2 class="section-title">Simple para el usuario.<br/>Complejo por dentro.</h2>
+      </div>
+      <div class="experience__steps">
+        <div class="exp-step reveal" style="--delay:0s">
+          <div class="exp-step__num">01</div>
+          <div class="exp-step__content">
+            <div class="exp-step__visual">
+              <svg viewBox="0 0 80 80" fill="none">
+                <rect x="15" y="25" width="50" height="35" rx="6" stroke="#00C853" stroke-width="1.5"/>
+                <path d="M30 25V18a10 10 0 0120 0v7" stroke="#00C853" stroke-width="1.5" stroke-linecap="round"/>
+                <circle cx="40" cy="43" r="7" stroke="#00C853" stroke-width="1.5"/>
+                <path d="M37 43l2.5 2.5 4-4" stroke="#00C853" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <h3>Implementación sencilla</h3>
+            <p>Enciende, configura el área a analizar desde la app y GrandRoot hace el resto. Sin calibraciones complejas. Sin manual de 200 páginas.</p>
+          </div>
+        </div>
+        <div class="exp-step reveal" style="--delay:0.15s">
+          <div class="exp-step__num">02</div>
+          <div class="exp-step__content">
+            <div class="exp-step__visual">
+              <svg viewBox="0 0 80 80" fill="none">
+                <circle cx="40" cy="40" r="25" stroke="#00C853" stroke-width="1.5" stroke-dasharray="6 3"/>
+                <path d="M40 25v15l10 5" stroke="#00C853" stroke-width="1.5" stroke-linecap="round"/>
+                <circle cx="40" cy="40" r="4" fill="#00C853" opacity="0.4"/>
+                <circle cx="40" cy="40" r="2" fill="#00C853"/>
+              </svg>
+            </div>
+            <h3>Operación autónoma</h3>
+            <p>GrandRoot recorre el campo en rutas optimizadas, recoge datos y regresa a la base de carga automáticamente. Trabaja de día y de noche.</p>
+          </div>
+        </div>
+        <div class="exp-step reveal" style="--delay:0.3s">
+          <div class="exp-step__num">03</div>
+          <div class="exp-step__content">
+            <div class="exp-step__visual">
+              <svg viewBox="0 0 80 80" fill="none">
+                <rect x="12" y="20" width="56" height="40" rx="4" stroke="#00C853" stroke-width="1.5"/>
+                <rect x="20" y="28" width="16" height="24" rx="2" stroke="#00C853" stroke-width="1"/>
+                <rect x="42" y="35" width="22" height="8" rx="2" stroke="#00C853" stroke-width="1" opacity="0.6"/>
+                <rect x="42" y="47" width="14" height="5" rx="2" stroke="#00C853" stroke-width="1" opacity="0.4"/>
+                <rect x="20" y="30" width="12" height="3" rx="1" fill="#00C853" opacity="0.3"/>
+              </svg>
+            </div>
+            <h3>Visualización de datos</h3>
+            <p>Mapas de calor del suelo, tendencias de nutrientes, alertas inteligentes y reportes exportables. Todo en un dashboard diseñado para tomar decisiones.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mini dashboard mockup -->
+      <div class="dashboard reveal">
+        <div class="dashboard__header">
+          <div class="dashboard__title">
+            <span class="db-dot db-dot--green"></span>
+            GrandRoot Dashboard — Parcela Norte
+          </div>
+          <div class="dashboard__meta">Última actualización: hace 2 min</div>
+        </div>
+        <div class="dashboard__body">
+          <div class="db-card">
+            <div class="db-card__label">Humedad promedio</div>
+            <div class="db-card__value">68<span>%</span></div>
+            <div class="db-card__trend db-card__trend--up">+3.2%</div>
+          </div>
+          <div class="db-card">
+            <div class="db-card__label">pH del suelo</div>
+            <div class="db-card__value">6.8</div>
+            <div class="db-card__trend db-card__trend--neutral">Óptimo</div>
+          </div>
+          <div class="db-card">
+            <div class="db-card__label">Nitrógeno (N)</div>
+            <div class="db-card__value">142<span>ppm</span></div>
+            <div class="db-card__trend db-card__trend--down">−5 ppm</div>
+          </div>
+          <div class="db-card">
+            <div class="db-card__label">Cobertura analizada</div>
+            <div class="db-card__value">94<span>%</span></div>
+            <div class="db-card__trend db-card__trend--up">En curso</div>
+          </div>
+          <div class="db-chart">
+            <div class="db-chart__label">Rendimiento estimado</div>
+            <div class="db-chart__bars">
+              <div class="db-bar" style="--h:55%"><span>Ene</span></div>
+              <div class="db-bar" style="--h:70%"><span>Feb</span></div>
+              <div class="db-bar" style="--h:60%"><span>Mar</span></div>
+              <div class="db-bar db-bar--active" style="--h:88%"><span>Abr</span></div>
+              <div class="db-bar" style="--h:78%"><span>May</span></div>
+              <div class="db-bar db-bar--proj" style="--h:92%"><span>Jun</span></div>
+            </div>
+          </div>
+          <div class="db-map">
+            <div class="db-map__label">Mapa de calor del suelo</div>
+            <div class="db-map__grid">
+              <div class="db-cell db-cell--high"></div>
+              <div class="db-cell db-cell--med"></div>
+              <div class="db-cell db-cell--high"></div>
+              <div class="db-cell db-cell--low"></div>
+              <div class="db-cell db-cell--med"></div>
+              <div class="db-cell db-cell--high"></div>
+              <div class="db-cell db-cell--low"></div>
+              <div class="db-cell db-cell--med"></div>
+              <div class="db-cell db-cell--high"></div>
+              <div class="db-cell db-cell--med"></div>
+              <div class="db-cell db-cell--high"></div>
+              <div class="db-cell db-cell--low"></div>
+              <div class="db-cell db-cell--high"></div>
+              <div class="db-cell db-cell--high"></div>
+              <div class="db-cell db-cell--med"></div>
+              <div class="db-cell db-cell--low"></div>
+            </div>
+            <div class="db-map__legend">
+              <span class="db-legend db-legend--high">Alto</span>
+              <span class="db-legend db-legend--med">Medio</span>
+              <span class="db-legend db-legend--low">Bajo</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BENEFITS -->
+  <section class="benefits" id="benefits">
+    <div class="benefits__container">
+      <div class="benefits__header reveal">
+        <span class="section-label">Performance stats</span>
+        <h2 class="section-title">Los números<br/>hablan solos.</h2>
+      </div>
+      <div class="benefits__grid">
+        <div class="metric reveal" style="--delay:0s">
+          <div class="metric__value" data-target="40">0</div>
+          <div class="metric__unit">%</div>
+          <div class="metric__label">Reducción en uso de agua</div>
+          <div class="metric__bar"><div class="metric__fill" style="--pct:40%"></div></div>
+        </div>
+        <div class="metric reveal" style="--delay:0.1s">
+          <div class="metric__value" data-target="35">0</div>
+          <div class="metric__unit">%</div>
+          <div class="metric__label">Ahorro en fertilizantes</div>
+          <div class="metric__bar"><div class="metric__fill" style="--pct:35%"></div></div>
+        </div>
+        <div class="metric reveal" style="--delay:0.2s">
+          <div class="metric__value" data-target="60">0</div>
+          <div class="metric__unit">%</div>
+          <div class="metric__label">Mayor velocidad de análisis</div>
+          <div class="metric__bar"><div class="metric__fill" style="--pct:60%"></div></div>
+        </div>
+        <div class="metric reveal" style="--delay:0.3s">
+          <div class="metric__value" data-target="3">0</div>
+          <div class="metric__unit">x</div>
+          <div class="metric__label">Mejora en toma de decisiones</div>
+          <div class="metric__bar"><div class="metric__fill" style="--pct:75%"></div></div>
+        </div>
+        <div class="metric reveal" style="--delay:0.4s">
+          <div class="metric__value" data-target="98">0</div>
+          <div class="metric__unit">%</div>
+          <div class="metric__label">Precisión en clasificación de suelo</div>
+          <div class="metric__bar"><div class="metric__fill" style="--pct:98%"></div></div>
+        </div>
+        <div class="metric reveal" style="--delay:0.5s">
+          <div class="metric__value" data-target="24">0</div>
+          <div class="metric__unit">h</div>
+          <div class="metric__label">Operación autónoma continua</div>
+          <div class="metric__bar"><div class="metric__fill" style="--pct:100%"></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- DIFFERENTIATOR -->
+  <section class="differentiator" id="differentiator">
+    <div class="differentiator__bg">
+      <div class="diff-grid-overlay"></div>
+    </div>
+    <div class="differentiator__container">
+      <div class="diff-statement reveal">
+        <p class="diff-quote">GrandRoot no solo ejecuta.</p>
+        <p class="diff-quote diff-quote--accent">Analiza. Aprende. Decide.</p>
+      </div>
+      <div class="diff-compare reveal">
+        <div class="diff-col diff-col--other">
+          <h4>Soluciones tradicionales</h4>
+          <ul>
+            <li class="diff-item diff-item--no">Análisis manual, semanas de espera</li>
+            <li class="diff-item diff-item--no">Sin datos en tiempo real</li>
+            <li class="diff-item diff-item--no">Operación 100% manual</li>
+            <li class="diff-item diff-item--no">Datos aislados sin contexto</li>
+            <li class="diff-item diff-item--no">Sin aprendizaje adaptativo</li>
+          </ul>
+        </div>
+        <div class="diff-divider">
+          <span>vs</span>
+        </div>
+        <div class="diff-col diff-col--grandroot">
+          <h4>GrandRoot</h4>
+          <ul>
+            <li class="diff-item diff-item--yes">Análisis instantáneo in-situ</li>
+            <li class="diff-item diff-item--yes">12 parámetros simultáneos</li>
+            <li class="diff-item diff-item--yes">Operación 100% autónoma</li>
+            <li class="diff-item diff-item--yes">IA contextual y predictiva</li>
+            <li class="diff-item diff-item--yes">Mejora con cada recorrido</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA FINAL -->
+  <section class="cta-section" id="cta">
+    <div class="cta-section__bg">
+      <div class="cta-particles" id="ctaParticles"></div>
+      <div class="cta-glow"></div>
+    </div>
+    <div class="cta-section__content reveal">
+      <span class="section-label">El futuro</span>
+      <h2 class="cta-title">El futuro del campo<br/>comienza hoy.</h2>
+      <p class="cta-desc">Únete a los pioneros que ya están transformando la agricultura con inteligencia autónoma. Agenda una demostración personalizada con nuestro equipo.</p>
+      <a href="mailto:demo@grandroot.io" class="btn btn--primary btn--lg">
+        Agenda una demostración
+        <span class="btn__arrow">→</span>
+      </a>
+      <p class="cta-note">Sin compromiso · Respuesta en 24h · Demo gratuita</p>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <div class="footer__top">
+      <div class="footer__brand">
+        <div class="footer__logo">
+          <span class="footer__logo-mark">GR</span>
+          <span class="footer__logo-text">GrandRoot</span>
+        </div>
+        <p class="footer__tagline">Inteligencia desde la raíz.</p>
+      </div>
+      <div class="footer__links-group">
+        <h5>Producto</h5>
+        <ul>
+          <li><a href="#product">Características</a></li>
+          <li><a href="#technology">Tecnología</a></li>
+          <li><a href="#experience">Experiencia</a></li>
+        </ul>
+      </div>
+      <div class="footer__links-group">
+        <h5>Empresa</h5>
+        <ul>
+          <li><a href="#">Acerca de</a></li>
+          <li><a href="#">Blog</a></li>
+          <li><a href="#">Contacto</a></li>
+        </ul>
+      </div>
+      <div class="footer__links-group">
+        <h5>Contacto</h5>
+        <ul>
+          <li><a href="mailto:info@grandroot.io">info@grandroot.io</a></li>
+          <li><a href="#">LinkedIn</a></li>
+          <li><a href="#">Twitter/X</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer__bottom">
+      <p>© 2025 GrandRoot. Todos los derechos reservados.</p>
+      <p class="footer__credit">Tecnología agrícola de precisión · Proyecto de ingeniería avanzada</p>
+    </div>
+  </footer>
+
+  <script src="main.js"></script>
+</body>
+</html>
