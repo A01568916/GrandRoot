@@ -1,0 +1,1058 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GrandRoot — Panel de Control</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #111318;
+      --surface:   #1a1d24;
+      --surface2:  #21252e;
+      --border:    #2e3340;
+      --green:     #00c896;
+      --green-dim: #004d3a;
+      --yellow:    #ffb400;
+      --red:       #ff3b30;
+      --blue:      #0a84ff;
+      --text:      #e2e6ef;
+      --text-dim:  #7a8296;
+      --radius:    8px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', 'Inter', system-ui, sans-serif;
+      font-size: 13px;
+      overflow: hidden;
+    }
+
+  <style>
+    /* ══ LAYOUT ═══════════════════════════════════════════════ */
+    .app {
+      display: grid;
+      grid-template-rows: 48px 1fr 58px;
+      height: 100vh;
+    }
+
+    /* ══ HEADER ════════════════════════════════════════════════ */
+    header {
+      background: #0e1016;
+      border-bottom: 2px solid var(--green);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 16px;
+      z-index: 1000;
+    }
+    .logo {
+      font-size: 15px; font-weight: 800;
+      color: var(--green); letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+    .logo span { color: var(--text-dim); font-weight: 400; font-size: 12px; margin-left: 6px; }
+    .spacer { flex: 1; }
+
+    .conn-badge {
+      display: flex; align-items: center; gap: 7px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 4px; padding: 5px 14px;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.8px;
+    }
+    .conn-dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--red); transition: background 0.3s;
+    }
+    .conn-dot.live { background: var(--green); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+    .time-display {
+      font-size: 13px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--text); letter-spacing: 1px;
+    }
+
+    /* ══ MAIN GRID ═════════════════════════════════════════════ */
+    /* | LEFT (todos los controles) | RIGHT (mapa) | */
+    .main {
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      overflow: hidden;
+    }
+
+    /* ══ PANEL IZQUIERDO ═══════════════════════════════════════ */
+    .left-panel {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .left-panel::-webkit-scrollbar { width: 4px; }
+    .left-panel::-webkit-scrollbar-thumb { background: var(--border); }
+
+    /* ── Joystick + D-pad lado a lado ─── */
+    .manual-controls {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .sec {
+      border-bottom: 1px solid var(--border);
+      padding: 12px 16px;
+    }
+    .sec:last-child { border-bottom: none; }
+    .sec-title {
+      font-size: 9px; font-weight: 800; letter-spacing: 1.6px;
+      text-transform: uppercase; color: var(--text-dim);
+      margin-bottom: 10px;
+    }
+
+    /* ── Modo operación ───── */
+    .mode-toggle {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .mode-btn {
+      padding: 14px 8px;
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 13px; font-weight: 800;
+      letter-spacing: 0.6px; text-transform: uppercase;
+      background: var(--bg); color: var(--text-dim);
+      transition: all 0.15s;
+    }
+    .mode-btn.active-auto {
+      background: var(--green-dim);
+      border-color: var(--green);
+      color: var(--green);
+      box-shadow: 0 0 12px #00c89633;
+    }
+    .mode-btn.active-manual {
+      background: #3a2100;
+      border-color: var(--yellow);
+      color: var(--yellow);
+      box-shadow: 0 0 12px #ffb40033;
+    }
+    .mode-chip {
+      margin-top: 8px;
+      padding: 7px 12px;
+      border-radius: 4px;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+    }
+    .mode-chip.auto   { background: #002a1f; color: var(--green);  border-left: 3px solid var(--green); }
+    .mode-chip.manual { background: #2e1a00; color: var(--yellow); border-left: 3px solid var(--yellow); }
+
+    /* ── Telemetría rápida (fila superior) ── */
+    .telem-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+    .tcard {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 10px 8px;
+      text-align: center;
+    }
+    .tcard-label {
+      font-size: 9px; font-weight: 700; letter-spacing: 1px;
+      text-transform: uppercase; color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .tcard-value {
+      font-size: 22px; font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+    .tcard-unit { font-size: 10px; color: var(--text-dim); font-weight: 500; }
+    .tcard-value.good  { color: var(--green); }
+    .tcard-value.warn  { color: var(--yellow); }
+    .tcard-value.bad   { color: var(--red); }
+
+    /* barra de confianza */
+    .conf-row {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 6px;
+    }
+    .conf-label { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
+    .conf-bar-bg {
+      flex: 1; height: 7px; background: var(--border);
+      border-radius: 4px; overflow: hidden;
+    }
+    .conf-bar-fill {
+      height: 100%; border-radius: 4px;
+      background: var(--green);
+      transition: width 0.35s ease, background 0.3s;
+    }
+    .conf-val {
+      font-size: 12px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      min-width: 36px; text-align: right;
+    }
+
+    /* ── Joystick ─────── */
+    .joystick-wrap {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 10px;
+    }
+    #joystick-canvas {
+      cursor: grab; border-radius: 50%;
+      touch-action: none; display: block;
+    }
+    #joystick-canvas:active { cursor: grabbing; }
+    .joy-readout {
+      display: flex; gap: 24px;
+      font-size: 12px; color: var(--text-dim);
+      font-variant-numeric: tabular-nums;
+    }
+    .joy-readout span { color: var(--text); font-weight: 700; }
+    .joy-hint { font-size: 10px; color: var(--text-dim); }
+
+    .joystick-disabled { opacity: 0.25; pointer-events: none; }
+
+    /* ── D-pad ─────── */
+    .dpad {
+      display: grid;
+      grid-template-areas: ". up ." "left stop right" ". down .";
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(3, 52px);
+      gap: 5px;
+    }
+    .dpad-btn {
+      background: var(--surface2);
+      border: 1.5px solid var(--border);
+      color: var(--text);
+      border-radius: var(--radius);
+      font-size: 20px;
+      cursor: pointer;
+      transition: background 0.1s, border-color 0.1s, transform 0.08s;
+      display: flex; align-items: center; justify-content: center;
+      user-select: none;
+    }
+    .dpad-btn:hover   { background: #272c38; border-color: #4a5160; }
+    .dpad-btn.pressed { background: var(--green-dim); border-color: var(--green);
+                        color: var(--green); transform: scale(0.92); }
+    .dpad-btn.stop-btn.pressed { background: #400; border-color: var(--red); color: var(--red); }
+    [data-dir="up"]    { grid-area: up; }
+    [data-dir="left"]  { grid-area: left; }
+    [data-dir="stop"]  { grid-area: stop; }
+    [data-dir="right"] { grid-area: right; }
+    [data-dir="down"]  { grid-area: down; }
+    .dpad-disabled { opacity: 0.2; pointer-events: none; }
+
+    /* ── E-stop ─────── */
+    .estop-btn {
+      width: 100%; padding: 16px;
+      background: #220808;
+      border: 2px solid var(--red);
+      border-radius: var(--radius);
+      color: var(--red);
+      font-size: 15px; font-weight: 800;
+      letter-spacing: 1.5px; text-transform: uppercase;
+      cursor: pointer; transition: background 0.12s;
+    }
+    .estop-btn:hover  { background: #3d0a0a; }
+    .estop-btn:active { background: var(--red); color: #fff; }
+
+    /* ══ ÁREA DERECHA: mapa ════════════════════════════════════ */
+    .right-area {
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ── Mapa ─────── */
+    #map {
+      width: 100%; height: 100%;
+    }
+    /* Ocultar atribución y logo de Leaflet */
+    .leaflet-control-attribution,
+    .leaflet-control-zoom { display: none !important; }
+    .leaflet-container {
+      background: #111318 !important;
+      font-family: inherit;
+    }
+    /* Evitar borde/recuadro en tiles con error */
+    .leaflet-tile-container img { outline: none !important; border: none !important; }
+    .leaflet-tile { border: none !important; outline: none !important; }
+
+    /* ── GPS strip ─── */
+    .gps-strip {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+    }
+    .gps-cell {
+      padding: 10px 16px;
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; justify-content: center;
+    }
+    .gps-cell:last-child { border-right: none; }
+    .gps-cell-label {
+      font-size: 9px; font-weight: 700; letter-spacing: 1.2px;
+      text-transform: uppercase; color: var(--text-dim);
+      margin-bottom: 5px;
+    }
+    .gps-cell-value {
+      font-size: 16px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      font-family: 'Courier New', monospace;
+      color: var(--text);
+    }
+    .gps-cell-value.good { color: var(--green); }
+
+    /* zoom controls propios */
+    .map-zoom {
+      position: absolute; bottom: 10px; right: 10px;
+      z-index: 500;
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .map-zoom-btn {
+      width: 34px; height: 34px;
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px;
+      font-size: 18px; font-weight: 700;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: background 0.1s;
+    }
+    .map-zoom-btn:hover { background: #272c38; }
+
+    /* centro-robot btn */
+    .map-center-btn {
+      position: absolute; bottom: 10px; left: 10px;
+      z-index: 500;
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px;
+      padding: 6px 10px; font-size: 11px; font-weight: 700;
+      cursor: pointer; transition: background 0.1s;
+    }
+    .map-center-btn:hover { background: #272c38; }
+
+    /* botón toggle online/offline del mapa */
+    .map-mode-btn {
+      position: absolute; top: 10px; right: 10px;
+      z-index: 500;
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text-dim); border-radius: 6px;
+      padding: 5px 10px; font-size: 10px; font-weight: 700;
+      letter-spacing: 0.6px; text-transform: uppercase;
+      cursor: pointer; transition: background 0.1s, color 0.1s;
+    }
+    .map-mode-btn.offline {
+      border-color: var(--yellow);
+      color: var(--yellow);
+    }
+
+    /* ══ FOOTER: E-stop + GPS ══════════════════════════════════ */
+    .app-footer {
+      display: flex;
+      align-items: stretch;
+      border-top: 2px solid var(--red);
+      background: var(--surface);
+      z-index: 900;
+    }
+    .footer-estop {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+    }
+    .footer-estop .estop-btn {
+      height: 100%;
+      border-radius: 0;
+      border: none;
+      border-right: 2px solid var(--red);
+      padding: 0 28px;
+      font-size: 14px;
+    }
+    /* GPS cells en footer */
+    .gps-strip {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+    }
+    .gps-cell {
+      padding: 6px 16px;
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; justify-content: center;
+    }
+    .gps-cell:last-child { border-right: none; }
+    .gps-cell-label {
+      font-size: 9px; font-weight: 700; letter-spacing: 1.2px;
+      text-transform: uppercase; color: var(--text-dim);
+      margin-bottom: 2px;
+    }
+    .gps-cell-value {
+      font-size: 14px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      font-family: 'Courier New', monospace;
+      color: var(--text);
+    }
+    .gps-cell-value.good { color: var(--green); }
+
+    /* ══ BATERÍA (header) ═════════════════════════════════════ */
+    .bat-widget {
+      display: flex; align-items: center; gap: 9px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 4px; padding: 5px 14px;
+    }
+    .bat-icon {
+      position: relative; width: 28px; height: 14px;
+    }
+    .bat-icon-body {
+      position: absolute; inset: 0;
+      border: 2px solid var(--text-dim);
+      border-radius: 3px;
+    }
+    .bat-icon-tip {
+      position: absolute; right: -5px; top: 50%;
+      transform: translateY(-50%);
+      width: 4px; height: 7px;
+      background: var(--text-dim);
+      border-radius: 0 2px 2px 0;
+    }
+    .bat-icon-fill {
+      position: absolute; left: 2px; top: 2px;
+      bottom: 2px; border-radius: 1px;
+      transition: width 0.5s ease, background 0.5s;
+      background: var(--green);
+      width: 100%;
+    }
+    .bat-info {
+      font-size: 12px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      display: flex; flex-direction: column;
+      line-height: 1.2;
+    }
+    .bat-pct   { color: var(--text); }
+    .bat-volt  { font-size: 10px; color: var(--text-dim); }
+  </style>
+  <!-- Socket.IO (cargado desde el servidor Flask cuando esté activo) -->
+  <!-- En modo local/simulación este script no existe y se maneja en JS -->
+  <script>
+    // Carga Socket.IO dinámicamente solo si hay servidor Flask
+    (function() {
+      const s = document.createElement('script');
+      s.src = '/socket.io/socket.io.js';
+      s.onerror = () => window.__NO_BACKEND = true;
+      document.head.appendChild(s);
+    })();
+  </script>
+</head>
+<body>
+<div class="app">
+
+  <!-- ══ HEADER ══════════════════════════════════════════════════ -->
+  <header>
+    <div class="logo">ROBOT AGRÍCOLA <span>Panel de Control</span></div>
+    <div class="spacer"></div>
+    <!-- Batería -->
+    <div class="bat-widget" id="bat-widget">
+      <div class="bat-icon">
+        <div class="bat-icon-body"></div>
+        <div class="bat-icon-tip"></div>
+        <div class="bat-icon-fill" id="bat-fill" style="width:100%"></div>
+      </div>
+      <div class="bat-info">
+        <span class="bat-pct" id="bat-pct">--%</span>
+        <span class="bat-volt" id="bat-volt">--.- V</span>
+      </div>
+    </div>
+    <div class="time-display" id="clock">--:--:--</div>
+    <div class="conn-badge">
+      <div class="conn-dot" id="conn-dot"></div>
+      <span id="conn-text">DESCONECTADO</span>
+    </div>
+  </header>
+
+  <!-- ══ MAIN ════════════════════════════════════════════════════ -->
+  <div class="main">
+
+    <!-- ══ PANEL IZQUIERDO: controles ══════════════════════════ -->
+    <div class="left-panel">
+
+      <!-- Modo operación -->
+      <div class="sec">
+        <div class="sec-title">Modo de operación</div>
+        <div class="mode-toggle">
+          <button class="mode-btn active-auto" id="btn-auto"   onclick="setMode('auto')">⚡ AUTOMÁTICO</button>
+          <button class="mode-btn"             id="btn-manual" onclick="setMode('manual')">🕹 MANUAL</button>
+        </div>
+        <div class="mode-chip auto" id="mode-chip">
+          Navegación autónoma — U-Net controla el robot
+        </div>
+      </div>
+
+      <!-- Telemetría rápida -->
+      <div class="sec">
+        <div class="sec-title">Telemetría</div>
+        <div class="telem-row">
+          <div class="tcard">
+            <div class="tcard-label">Velocidad</div>
+            <div class="tcard-value good" id="tval-speed">0.00 <span class="tcard-unit">m/s</span></div>
+          </div>
+          <div class="tcard">
+            <div class="tcard-label">Rumbo</div>
+            <div class="tcard-value" id="tval-heading">0 <span class="tcard-unit">°</span></div>
+          </div>
+          <div class="tcard">
+            <div class="tcard-label">Ángulo U-Net</div>
+            <div class="tcard-value" id="tval-angle">+0.0 <span class="tcard-unit">°</span></div>
+          </div>
+        </div>
+        <!-- Confianza modelo -->
+        <div class="conf-row" style="margin-top:10px">
+          <div class="conf-label">CONFIANZA</div>
+          <div class="conf-bar-bg">
+            <div class="conf-bar-fill" id="conf-bar" style="width:0%"></div>
+          </div>
+          <div class="conf-val" id="tval-conf">0%</div>
+        </div>
+      </div>
+
+      <!-- Control manual: joystick + d-pad lado a lado -->
+      <div class="sec">
+        <div class="sec-title">Control manual &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0">W A S D / flechas</span></div>
+        <div class="manual-controls" id="joy-wrap">
+          <div class="joystick-wrap">
+            <canvas id="joystick-canvas" width="150" height="150"></canvas>
+            <div class="joy-readout">
+              <div>X &nbsp;<span id="joy-x">0.00</span></div>
+              <div>Y &nbsp;<span id="joy-y">0.00</span></div>
+            </div>
+          </div>
+          <div class="dpad" id="dpad">
+            <button class="dpad-btn" data-dir="up"    title="W / ↑">▲</button>
+            <button class="dpad-btn" data-dir="left"  title="A / ←">◀</button>
+            <button class="dpad-btn stop-btn" data-dir="stop" title="Espacio">■</button>
+            <button class="dpad-btn" data-dir="right" title="D / →">▶</button>
+            <button class="dpad-btn" data-dir="down"  title="S / ↓">▼</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /left-panel -->
+
+    <!-- ══ ÁREA DERECHA: mapa + GPS strip ══════════════════════ -->
+    <div class="right-area" style="position:relative">
+
+      <div id="map" style="width:100%;height:100%;"></div>
+
+      <!-- Controles de mapa flotantes -->
+      <div class="map-zoom">
+        <button class="map-zoom-btn" onclick="map.zoomIn()">+</button>
+        <button class="map-zoom-btn" onclick="map.zoomOut()">−</button>
+      </div>
+      <button class="map-center-btn" onclick="centerOnRobot()">⊙ Centrar</button>
+      <button class="map-mode-btn" id="map-mode-btn" onclick="toggleMapMode()">&#127760; Online</button>
+
+    </div><!-- /right-area -->
+
+  </div><!-- /main -->
+
+  <!-- ══ FOOTER: E-stop + GPS ═══════════════════════════════════ -->
+  <div class="app-footer">
+    <div class="footer-estop">
+      <button class="estop-btn" onclick="emergencyStop()">⛔ &nbsp; PARADA DE EMERGENCIA</button>
+    </div>
+    <div class="gps-strip">
+      <div class="gps-cell">
+        <div class="gps-cell-label">Latitud</div>
+        <div class="gps-cell-value" id="gps-lat">---.------</div>
+      </div>
+      <div class="gps-cell">
+        <div class="gps-cell-label">Longitud</div>
+        <div class="gps-cell-value" id="gps-lon">---.------</div>
+      </div>
+      <div class="gps-cell">
+        <div class="gps-cell-label">Altitud</div>
+        <div class="gps-cell-value" id="gps-alt">--- m</div>
+      </div>
+      <div class="gps-cell">
+        <div class="gps-cell-label">Fix GPS</div>
+        <div class="gps-cell-value good" id="gps-fix">---</div>
+      </div>
+    </div>
+  </div><!-- /footer -->
+
+</div><!-- /app -->
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   MAPA  (Leaflet + OpenStreetMap)
+   Cuando no haya internet se puede cambiar a tiles offline.
+══════════════════════════════════════════════════════════════ */
+const DEFAULT_LAT = 20.9674;   // <-- cambia a las coords de tu campo
+const DEFAULT_LON = -89.5926;
+
+const map = L.map('map', {
+  center: [DEFAULT_LAT, DEFAULT_LON],
+  zoom: 18,
+  zoomControl: false,
+  attributionControl: false
+});
+
+/* ── Capa Online (OpenStreetMap) ──────────────────────────────── */
+const onlineTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 21,
+  maxNativeZoom: 19,
+  errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+});
+
+/* ── Capa Offline: cuadrícula de campo sobre fondo oscuro ───────── */
+const offlineGrid = L.GridLayer.extend({
+  createTile(coords) {
+    const tile   = document.createElement('canvas');
+    const size   = this.getTileSize();
+    tile.width   = size.x;
+    tile.height  = size.y;
+    const ctx    = tile.getContext('2d');
+
+    /* fondo */
+    ctx.fillStyle = '#111318';
+    ctx.fillRect(0, 0, size.x, size.y);
+
+    /* cuadrícula fina */
+    ctx.strokeStyle = '#1e2230';
+    ctx.lineWidth   = 1;
+    const step = size.x / 4;   // 4 celdas por tile
+    for (let x = 0; x <= size.x; x += step) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, size.y); ctx.stroke();
+    }
+    for (let y = 0; y <= size.y; y += step) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(size.x, y); ctx.stroke();
+    }
+
+    /* número de tile (orientación) */
+    ctx.fillStyle = '#2a3040';
+    ctx.font      = '10px monospace';
+    ctx.fillText(`${coords.z}/${coords.x}/${coords.y}`, 4, 12);
+
+    return tile;
+  }
+});
+const offlineTilesLayer = new offlineGrid({ opacity: 1 });
+
+/* ── Estado del mapa ───────────────────────────────────────── */
+let mapOnline = true;
+
+function setMapMode(online) {
+  mapOnline = online;
+  const btn = document.getElementById('map-mode-btn');
+  if (online) {
+    map.removeLayer(offlineTilesLayer);
+    onlineTiles.addTo(map);
+    btn.textContent = '\uD83C\uDF10 Online';
+    btn.classList.remove('offline');
+  } else {
+    map.removeLayer(onlineTiles);
+    offlineTilesLayer.addTo(map);
+    btn.textContent = '\uD83D\uDCF4 Sin internet';
+    btn.classList.add('offline');
+  }
+}
+
+function toggleMapMode() {
+  setMapMode(!mapOnline);
+}
+
+/* Detectar automáticamente si hay internet al arrancar */
+fetch('https://tile.openstreetmap.org/favicon.ico', { mode: 'no-cors', cache: 'no-cache' })
+  .then(()  => setMapMode(true))
+  .catch(() => setMapMode(false));
+
+// añadir capa inicial (online por defecto; se cambia si no hay red)
+onlineTiles.addTo(map);
+
+/* Marcador del robot (SVG inline para no depender de iconos externos) */
+const robotIcon = L.divIcon({
+  className: '',
+  html: `<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="14" cy="14" r="13" fill="#161b22" stroke="#3fb950" stroke-width="2"/>
+    <polygon points="14,5 20,21 14,17 8,21" fill="#3fb950"/>
+  </svg>`,
+  iconSize:   [28, 28],
+  iconAnchor: [14, 14]
+});
+
+const robotMarker = L.marker([DEFAULT_LAT, DEFAULT_LON], { icon: robotIcon }).addTo(map);
+
+/* Traza de la trayectoria */
+const trajectory = L.polyline([], {
+  color: '#3fb950', weight: 2, opacity: 0.6, dashArray: '4 4'
+}).addTo(map);
+
+/* ══════════════════════════════════════════════════════════════
+   ESTADO DE LA APLICACIÓN
+══════════════════════════════════════════════════════════════ */
+let mode = 'auto';   // 'auto' | 'manual'
+let connected = false;
+
+/* ══════════════════════════════════════════════════════════════
+   RELOJ
+══════════════════════════════════════════════════════════════ */
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent =
+    now.toTimeString().slice(0, 8);
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+function centerOnRobot() {
+  const ll = robotMarker.getLatLng();
+  map.setView(ll, map.getZoom());
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MODO MANUAL / AUTOMÁTICO
+══════════════════════════════════════════════════════════════ */
+function setMode(m) {
+  mode = m;
+  const btnAuto   = document.getElementById('btn-auto');
+  const btnManual = document.getElementById('btn-manual');
+  const chip      = document.getElementById('mode-chip');
+  const joyWrap   = document.getElementById('joy-wrap');
+  const dpad      = document.getElementById('dpad');
+
+  btnAuto.classList.remove('active-auto');
+  btnManual.classList.remove('active-manual');
+
+  if (m === 'auto') {
+    btnAuto.classList.add('active-auto');
+    chip.className = 'mode-chip auto';
+    chip.textContent = 'Navegación autónoma — U-Net controla el robot';
+    joyWrap.classList.add('joystick-disabled');
+    dpad.classList.add('dpad-disabled');
+  } else {
+    btnManual.classList.add('active-manual');
+    chip.className = 'mode-chip manual';
+    chip.textContent = 'Control manual activo — usa joystick o W A S D';
+    joyWrap.classList.remove('joystick-disabled');
+    dpad.classList.remove('dpad-disabled');
+  }
+  // TODO (backend): socket.emit('set_mode', { mode: m });
+  if (window.socket) window.socket.emit('set_mode', { mode: m });
+}
+setMode('auto');  // estado inicial
+
+/* ══════════════════════════════════════════════════════════════
+   BATERÍA
+══════════════════════════════════════════════════════════════ */
+// 4S Li-ion: 12.0V = 0%, 16.8V = 100%
+function updateBattery(voltage) {
+  const pct = Math.max(0, Math.min(100, Math.round((voltage - 12.0) / (16.8 - 12.0) * 100)));
+  document.getElementById('bat-pct').textContent  = pct + '%';
+  document.getElementById('bat-volt').textContent = voltage.toFixed(1) + ' V';
+  const fill = document.getElementById('bat-fill');
+  fill.style.width = pct + '%';
+  fill.style.background = pct > 50 ? 'var(--green)' : pct > 20 ? 'var(--yellow)' : 'var(--red)';
+  // alerta visual si muy baja
+  document.getElementById('bat-widget').style.borderColor =
+    pct <= 15 ? 'var(--red)' : 'var(--border)';
+  // TODO (backend): la batería llega como campo en el mensaje de telemetría
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PARADA DE EMERGENCIA
+══════════════════════════════════════════════════════════════ */
+function emergencyStop() {
+  if (window.socket) window.socket.emit('emergency_stop');
+  setMode('manual');
+  updateTelemetry({ speed: 0, angle: 0, conf: 0 });
+  alert('⛔ Parada de emergencia enviada.');
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ACTUALIZAR TELEMETRÍA EN UI
+══════════════════════════════════════════════════════════════ */
+function updateTelemetry({ speed, heading, angle, conf, lat, lon, alt }) {
+  if (speed   !== undefined) {
+    const el = document.getElementById('tval-speed');
+    el.innerHTML = speed.toFixed(2) + ' <span class="tcard-unit">m/s</span>';
+    el.className = 'tcard-value ' + (speed < 0.01 ? '' : speed < 0.5 ? 'warn' : 'good');
+  }
+  if (heading !== undefined)
+    document.getElementById('tval-heading').innerHTML =
+      Math.round(heading) + ' <span class="tcard-unit">°</span>';
+
+  if (angle !== undefined) {
+    const el = document.getElementById('tval-angle');
+    el.innerHTML = (angle >= 0 ? '+' : '') + angle.toFixed(1) + ' <span class="tcard-unit">°</span>';
+    el.className = 'tcard-value ' +
+      (Math.abs(angle) < 5 ? 'good' : Math.abs(angle) < 20 ? 'warn' : 'bad');
+  }
+  if (conf !== undefined) {
+    const pct = Math.round(conf * 100);
+    document.getElementById('tval-conf').textContent = pct + '%';
+    const bar = document.getElementById('conf-bar');
+    bar.style.width    = pct + '%';
+    bar.style.background = pct > 60 ? 'var(--green)' : pct > 30 ? 'var(--yellow)' : 'var(--red)';
+  }
+  if (lat !== undefined && lon !== undefined) {
+    document.getElementById('gps-lat').textContent = lat.toFixed(6);
+    document.getElementById('gps-lon').textContent = lon.toFixed(6);
+    if (alt !== undefined)
+      document.getElementById('gps-alt').textContent = alt.toFixed(1) + ' m';
+    document.getElementById('gps-fix').textContent = 'OK';
+
+    robotMarker.setLatLng([lat, lon]);
+    trajectory.addLatLng([lat, lon]);
+    if (trajectory.getLatLngs().length < 3) map.setView([lat, lon]);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   JOYSTICK VIRTUAL (canvas)
+══════════════════════════════════════════════════════════════ */
+(function () {
+  const canvas = document.getElementById('joystick-canvas');
+  const ctx    = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const cx = W / 2, cy = H / 2;
+  const outerR = W / 2 - 8;
+  const innerR = 28;
+  const deadzone = 0.08;
+
+  let dragging = false;
+  let stickX = 0, stickY = 0;   // -1 .. +1
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    /* zona exterior */
+    ctx.beginPath();
+    ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
+    ctx.strokeStyle = '#30363d';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#0d1117';
+    ctx.fill();
+
+    /* cruz de referencia */
+    ctx.strokeStyle = '#21262d';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx, cy - outerR); ctx.lineTo(cx, cy + outerR); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - outerR, cy); ctx.lineTo(cx + outerR, cy); ctx.stroke();
+
+    /* línea de dirección */
+    const px = cx + stickX * outerR;
+    const py = cy + stickY * outerR;
+    if (Math.hypot(stickX, stickY) > deadzone) {
+      ctx.strokeStyle = '#3fb95044';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(px, py); ctx.stroke();
+    }
+
+    /* stick */
+    const hasInput = Math.hypot(stickX, stickY) > deadzone;
+    const grad = ctx.createRadialGradient(px - 3, py - 3, 1, px, py, innerR);
+    grad.addColorStop(0, hasInput ? '#5de08a' : '#8b949e');
+    grad.addColorStop(1, hasInput ? '#1f6b2e' : '#21262d');
+    ctx.beginPath();
+    ctx.arc(px, py, innerR, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.strokeStyle = hasInput ? '#3fb950' : '#30363d';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  function setStick(ex, ey) {
+    const rect = canvas.getBoundingClientRect();
+    const dx = (ex - rect.left)  - cx;
+    const dy = (ey - rect.top)   - cy;
+    const dist = Math.min(Math.hypot(dx, dy), outerR);
+    const angle = Math.atan2(dy, dx);
+    stickX = (dist / outerR) * Math.cos(angle);
+    stickY = (dist / outerR) * Math.sin(angle);
+    publishJoystick();
+    draw();
+  }
+
+  function releaseStick() {
+    dragging = false;
+    stickX = 0; stickY = 0;
+    publishJoystick();
+    draw();
+  }
+
+  function publishJoystick() {
+    const ax = Math.abs(stickX) < deadzone ? 0 : stickX;
+    const ay = Math.abs(stickY) < deadzone ? 0 : stickY;
+    document.getElementById('joy-x').textContent = ax.toFixed(2);
+    document.getElementById('joy-y').textContent = ay.toFixed(2);
+    if (window.socket) window.socket.emit('manual_cmd', { x: ax, y: -ay });
+  }
+
+  /* Mouse */
+  canvas.addEventListener('mousedown',  e => { dragging = true; setStick(e.clientX, e.clientY); });
+  window.addEventListener('mousemove',  e => { if (dragging) setStick(e.clientX, e.clientY); });
+  window.addEventListener('mouseup',    ()  => { if (dragging) releaseStick(); });
+
+  /* Touch */
+  canvas.addEventListener('touchstart', e => { e.preventDefault(); dragging = true;
+    setStick(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
+  window.addEventListener('touchmove', e => { if (dragging) {
+    e.preventDefault(); setStick(e.touches[0].clientX, e.touches[0].clientY); }
+  }, { passive: false });
+  window.addEventListener('touchend',  () => { if (dragging) releaseStick(); });
+
+  draw();
+})();
+
+/* ══════════════════════════════════════════════════════════════
+   D-PAD — botones
+══════════════════════════════════════════════════════════════ */
+document.querySelectorAll('.dpad-btn').forEach(btn => {
+  btn.addEventListener('mousedown',  () => onDpadDown(btn.dataset.dir, btn));
+  btn.addEventListener('mouseup',    () => onDpadUp(btn));
+  btn.addEventListener('mouseleave', () => onDpadUp(btn));
+  btn.addEventListener('touchstart', e => { e.preventDefault(); onDpadDown(btn.dataset.dir, btn); }, { passive: false });
+  btn.addEventListener('touchend',   () => onDpadUp(btn));
+});
+
+function onDpadDown(dir, btn) {
+  if (mode !== 'manual') return;
+  btn.classList.add('pressed');
+  const v = dpadToVelocity(dir);
+  if (window.socket) window.socket.emit('manual_cmd', v);
+}
+function onDpadUp(btn) {
+  btn.classList.remove('pressed');
+  if (window.socket) window.socket.emit('manual_cmd', { x: 0, y: 0 });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TECLADO  (W A S D / flechas)
+══════════════════════════════════════════════════════════════ */
+const KEY_DIR = {
+  'ArrowUp': 'up',   'w': 'up',
+  'ArrowDown': 'down', 's': 'down',
+  'ArrowLeft': 'left', 'a': 'left',
+  'ArrowRight': 'right', 'd': 'right',
+  ' ': 'stop'
+};
+
+document.addEventListener('keydown', e => {
+  if (mode !== 'manual') return;
+  const dir = KEY_DIR[e.key];
+  if (!dir) return;
+  e.preventDefault();
+  const btn = document.querySelector(`.dpad-btn[data-dir="${dir}"]`);
+  if (btn && !btn.classList.contains('pressed')) {
+    btn.classList.add('pressed');
+    if (window.socket) window.socket.emit('manual_cmd', dpadToVelocity(dir));
+  }
+});
+
+document.addEventListener('keyup', e => {
+  const dir = KEY_DIR[e.key];
+  if (!dir) return;
+  const btn = document.querySelector(`.dpad-btn[data-dir="${dir}"]`);
+  if (btn) {
+    btn.classList.remove('pressed');
+    if (window.socket) window.socket.emit('manual_cmd', { x: 0, y: 0 });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   CONVERSIÓN D-PAD → VELOCIDAD
+══════════════════════════════════════════════════════════════ */
+function dpadToVelocity(dir) {
+  const map = { up:{x:0,y:1}, down:{x:0,y:-1}, left:{x:-1,y:0}, right:{x:1,y:0}, stop:{x:0,y:0} };
+  return map[dir] || {x:0, y:0};
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CONEXIÓN SOCKETIO + FALLBACK A SIMULACIÓN
+══════════════════════════════════════════════════════════════ */
+let simInterval = null;
+
+function startSimulation() {
+  if (simInterval) return;
+  let simT = 0;
+  let simLat = DEFAULT_LAT, simLon = DEFAULT_LON;
+  simInterval = setInterval(() => {
+    simT += 0.08;
+    simLat += 0.000005 + Math.sin(simT * 0.3) * 0.000002;
+    simLon += 0.000003 + Math.cos(simT * 0.2) * 0.000001;
+    updateTelemetry({
+      speed:   0.3 + Math.sin(simT) * 0.15,
+      heading: (simT * 8) % 360,
+      angle:   Math.sin(simT * 0.7) * 12,
+      conf:    0.55 + Math.sin(simT * 0.4) * 0.35,
+      lat: simLat, lon: simLon, alt: 12.5
+    });
+    updateBattery(Math.max(12.0, 16.2 - (simT / 500) * 4.2));
+    if (!connected && simT > 1.5) {
+      connected = true;
+      document.getElementById('conn-dot').classList.add('live');
+      document.getElementById('conn-text').textContent = 'SIMULACIÓN';
+    }
+  }, 100);
+}
+
+function stopSimulation() {
+  if (simInterval) { clearInterval(simInterval); simInterval = null; }
+}
+
+function connectBackend() {
+  if (window.__NO_BACKEND || typeof io === 'undefined') {
+    // Sin servidor Flask → modo simulación
+    startSimulation();
+    return;
+  }
+
+  const socket = io({ reconnection: true, reconnectionDelay: 2000 });
+  window.socket = socket;
+
+  socket.on('connect', () => {
+    stopSimulation();
+    connected = true;
+    document.getElementById('conn-dot').classList.add('live');
+    document.getElementById('conn-text').textContent = 'CONECTADO';
+    console.log('[WS] Conectado al servidor');
+    // Sincronizar modo actual
+    socket.emit('set_mode', { mode });
+  });
+
+  socket.on('disconnect', () => {
+    connected = false;
+    document.getElementById('conn-dot').classList.remove('live');
+    document.getElementById('conn-text').textContent = 'DESCONECTADO';
+    // Volver a simulación mientras reconecta
+    startSimulation();
+  });
+
+  socket.on('telemetry', data => {
+    stopSimulation();
+    updateTelemetry(data);
+  });
+
+  socket.on('battery', voltage => updateBattery(voltage));
+}
+
+// Esperar a que cargue Socket.IO (puede tardar un momento si el servidor está arrancando)
+window.addEventListener('load', () => {
+  // Pequeño retardo para que el script de socket.io termine de cargar
+  setTimeout(connectBackend, 500);
+});
+</script>
+</body>
+</html>
