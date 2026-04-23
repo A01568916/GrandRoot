@@ -121,7 +121,7 @@ GrandRoot/
 
 - Python
 - C/C++ (Arduino)
-- ROS (opcional)
+- ROS
 - Algoritmos de navegación
 
 ## Aplicaciones
