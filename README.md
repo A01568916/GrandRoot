@@ -1,110 +1,114 @@
-🌱 GrandRoot
-Carrito Autónomo para Análisis Inteligente del Suelo
+# 🌱 GrandRoot
 
-🚀 Descripción del Proyecto
+**Carrito autónomo para análisis inteligente del suelo.**
 
-GrandRoot es un sistema autónomo terrestre diseñado para la recolección, análisis y procesamiento de datos agrícolas en tiempo real.
+GrandRoot es un sistema autónomo terrestre diseñado para **recolectar, analizar y procesar datos agrícolas en tiempo real**, ayudando a mejorar la toma de decisiones en agricultura de precisión.
 
-El proyecto consiste en un carrito autónomo inteligente capaz de desplazarse por terrenos agrícolas mientras mide variables clave del suelo, como:
+## Tabla de contenidos
 
-- Humedad
+- [¿Qué problema resuelve?](#qué-problema-resuelve)
+- [Objetivos](#objetivos)
+- [Arquitectura del sistema](#arquitectura-del-sistema)
+- [Funcionalidades](#funcionalidades)
+- [Estructura del repositorio](#estructura-del-repositorio)
+- [Tecnologías](#tecnologías)
+- [Aplicaciones](#aplicaciones)
+- [Estado del proyecto](#estado-del-proyecto)
+- [Futuras mejoras](#futuras-mejoras)
+- [Equipo](#equipo)
+- [Licencia](#licencia)
+- [Contacto](#contacto)
+
+## ¿Qué mide?
+
+- Humedad del suelo
 - pH
 - Temperatura
 - Conductividad eléctrica
 - Condiciones ambientales
 
-El objetivo principal es proporcionar información precisa y automatizada para mejorar la toma de decisiones en la agricultura, optimizando recursos y aumentando la productividad.
+## ¿Qué problema resuelve?
 
-🎯 Problema que Resuelve
-
-La agricultura tradicional presenta varias limitaciones:
+En agricultura tradicional suele haber:
 
 - Medición manual del suelo (lenta e imprecisa)
 - Falta de monitoreo en tiempo real
 - Uso ineficiente de agua y fertilizantes
 - Baja integración tecnológica en campo
 
-GrandRoot soluciona esto mediante:
+GrandRoot lo mejora mediante:
 
 - Automatización del análisis del suelo
 - Recolección continua de datos
 - Procesamiento inteligente
 - Soporte para decisiones agrícolas
 
-🧠 Objetivo del Sistema
+## Objetivos
 
-Desarrollar un sistema autónomo que:
+- Navegar de forma independiente en terrenos agrícolas.
+- Recolectar datos del suelo en tiempo real.
+- Procesar información mediante algoritmos inteligentes.
+- Generar recomendaciones para el agricultor.
 
-- Navegue de forma independiente en terrenos agrícolas
-- Recolecte datos del suelo en tiempo real
-- Procese la información mediante algoritmos inteligentes
-- Genere recomendaciones para el agricultor
-
-⚙️ Arquitectura del Sistema
+## Arquitectura del sistema
 
 El sistema está compuesto por cinco módulos principales:
 
-1. 🚗 Movilidad (Plataforma Robótica)
+1. **🚗 Movilidad (plataforma robótica)**
    - Chasis móvil (ruedas o tracción)
    - Motores y controladores
    - Sistema de dirección
-2. 🔍 Sensores
+2. **🔍 Sensores**
    - Sensor de humedad del suelo
    - Sensor de pH
    - Sensor de temperatura
    - GPS (posicionamiento)
    - IMU (orientación y movimiento)
    - Sensores de proximidad (evitación de obstáculos)
-3. 🧠 Unidad de Control
+3. **🧠 Unidad de control**
    - Microcontrolador (Arduino / ESP32)
    - Computadora embebida (Raspberry Pi opcional)
    - Procesamiento de datos
-4. 📡 Comunicación
+4. **📡 Comunicación**
    - WiFi / Bluetooth / LoRa
    - Transmisión de datos en tiempo real
    - Integración con la nube (opcional)
-5. 🤖 Software Inteligente
+5. **🤖 Software inteligente**
    - Algoritmos de navegación autónoma
    - Procesamiento de datos agrícolas
    - Análisis predictivo (IA futura)
 
-🧭 Funcionalidades Principales
+## Funcionalidades
 
-- ✔️ Navegación autónoma
-- ✔️ Recolección de datos del suelo
-- ✔️ Geolocalización de mediciones
-- ✔️ Evitación de obstáculos
-- ✔️ Monitoreo en tiempo real
-- ✔️ Análisis de condiciones del terreno
+- Navegación autónoma
+- Recolección de datos del suelo
+- Geolocalización de mediciones
+- Evitación de obstáculos
+- Monitoreo en tiempo real
+- Análisis de condiciones del terreno
 
-🏗️ Estructura del Repositorio
+## Estructura del repositorio
 
-```
+```text
 GrandRoot/
-│
 ├── hardware/
 │   ├── esquemas/
-│   ├── componentes/
-│
+│   └── componentes/
 ├── firmware/
 │   ├── sensores/
-│   ├── control_motores/
-│
+│   └── control_motores/
 ├── software/
 │   ├── navegación/
-│   ├── procesamiento_datos/
-│
+│   └── procesamiento_datos/
 ├── docs/
 │   ├── marco_teorico/
 │   ├── analisis_factibilidad/
-│   ├── diagramas/
-│
+│   └── diagramas/
 ├── simulations/
-│
 └── README.md
 ```
 
-🔬 Tecnologías Utilizadas
+## Tecnologías
 
 ### Hardware
 
@@ -120,7 +124,7 @@ GrandRoot/
 - ROS (opcional)
 - Algoritmos de navegación
 
-📊 Aplicaciones
+## Aplicaciones
 
 - Agricultura de precisión
 - Monitoreo de cultivos
@@ -128,27 +132,18 @@ GrandRoot/
 - Análisis de fertilidad del suelo
 - Investigación agronómica
 
-🌍 Impacto
+## Estado del proyecto
 
-GrandRoot contribuye a:
-
-- 🌱 Agricultura sostenible
-- 💧 Uso eficiente del agua
-- 📈 Incremento de productividad
-- 🤖 Digitalización del campo
-
-🚧 Estado del Proyecto
-
-🔄 En desarrollo
+🔄 **En desarrollo**
 
 Fases actuales:
 
-- Diseño conceptual ✔️
+- Diseño conceptual ✅
 - Desarrollo de hardware 🔄
 - Implementación de sensores 🔄
 - Programación de navegación ⏳
 
-🔮 Futuras Mejoras
+## Futuras mejoras
 
 - Integración con inteligencia artificial
 - App móvil para monitoreo
@@ -156,7 +151,7 @@ Fases actuales:
 - Uso de drones complementarios
 - Análisis predictivo de cultivos
 
-👨‍💻 Equipo
+## Equipo
 
 Proyecto desarrollado por estudiantes de ingeniería en:
 
@@ -164,13 +159,13 @@ Proyecto desarrollado por estudiantes de ingeniería en:
 - Mecánica
 - Biotecnología
 
-📜 Licencia
+## Licencia
 
-Este proyecto se encuentra bajo la licencia MIT.
+Este proyecto se encuentra bajo la licencia **MIT**.
 
-📬 Contacto
+## Contacto
 
 Para colaboraciones o más información:
 
-- Email: [tu correo]
-- GitHub: [tu perfil]
+- Email: `[tu correo]`
+- GitHub: `[tu perfil]`
