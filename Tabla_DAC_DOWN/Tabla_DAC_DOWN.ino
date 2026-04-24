@@ -3,6 +3,12 @@
 
 #define ENC_DER 32
 #define ENC_IZQ 34
+#define ENC_DER 32
+#define ENC_IZQ 34
+#define EN_DER 33
+#define EN_IZQ 13
+#define FR_DER 27
+#define FR_IZQ 14
 
 // ===== CONSTANTES =====
 const float DIST_POR_PULSO = 0.0585; // metros
@@ -27,7 +33,19 @@ void setup() {
 
   pinMode(ENC_DER, INPUT_PULLUP);
   pinMode(ENC_IZQ, INPUT_PULLUP);
+  // Pines de control
+  pinMode(EN_DER, OUTPUT);
+  pinMode(EN_IZQ, OUTPUT);
+  pinMode(FR_DER, OUTPUT);
+  pinMode(FR_IZQ, OUTPUT);
 
+  // Activar motores (igual que tu caso E)
+  digitalWrite(EN_DER, HIGH);
+  digitalWrite(EN_IZQ, HIGH);
+  digitalWrite(FR_DER, LOW); // adelante
+  digitalWrite(FR_IZQ, HIGH); // adelante
+
+  
   attachInterrupt(digitalPinToInterrupt(ENC_DER), contarDer, RISING);
   attachInterrupt(digitalPinToInterrupt(ENC_IZQ), contarIzq, RISING);
 
