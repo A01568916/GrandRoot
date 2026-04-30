@@ -48,6 +48,12 @@ main{flex:1;padding:20px;display:grid;grid-template-columns:280px 1fr;grid-templ
 .speed-row label{font-size:12px;color:var(--muted);white-space:nowrap}
 input[type=range]{flex:1;accent-color:var(--accent)}
 #speedVal{font-size:13px;font-weight:700;min-width:30px;text-align:right}
+.btn-enable{width:100%;padding:10px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;transition:.15s;letter-spacing:.04em}
+.btn-activar{background:#238636;color:#fff}.btn-activar:hover{background:#2ea043}
+.btn-paro{background:#da3633;color:#fff}.btn-paro:hover{background:#f85149}
+.estado-badge{text-align:center;padding:7px 10px;border-radius:6px;font-size:12px;font-weight:700;margin-bottom:10px}
+.estado-detenido{background:#3d1f1e;color:var(--red);border:1px solid #da3633}
+.estado-activo{background:#1a2f1a;color:var(--green);border:1px solid #238636}
 </style>
 </head>
 <body>
@@ -60,6 +66,14 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 </header>
 <main>
   <div class="panel-left">
+    <div class="card">
+      <div class="card-title"><i class="bi bi-power"></i> Motores</div>
+      <div id="estado-badge" class="estado-badge estado-detenido">⛔ MOTORES DETENIDOS</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-enable btn-activar" onclick="setEnable(true)"><i class="bi bi-play-fill"></i> ACTIVAR</button>
+        <button class="btn-enable btn-paro"    onclick="setEnable(false)"><i class="bi bi-stop-fill"></i> PARO</button>
+      </div>
+    </div>
     <div class="card">
       <div class="card-title"><i class="bi bi-arrow-left-right"></i> Referencias (cinemática)</div>
       <div class="refs-row">
@@ -105,7 +119,23 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 </main>
 <script>
 let sendTimer = null;
+let motoresActivos = false;
+
+async function setEnable(on) {
+  const r = await fetch('/api/enable', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({on})
+  });
+  const j = await r.json();
+  motoresActivos = j.enabled;
+  const badge = document.getElementById('estado-badge');
+  badge.className = 'estado-badge ' + (motoresActivos ? 'estado-activo' : 'estado-detenido');
+  badge.textContent = motoresActivos ? '\u2705 MOTORES ACTIVOS' : '\u26d4 MOTORES DETENIDOS';
+  if (!motoresActivos) { vxActual=0; vyActual=0; resetJoystick(); }
+}
+
 async function enviarMovimiento(vx, vy) {
+  if (!motoresActivos) return;
   const r = await fetch('/api/mover', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ vx, vy })

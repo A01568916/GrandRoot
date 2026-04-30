@@ -5,11 +5,11 @@
 //   1. Conectarse al WiFi  →  "GrandRoot"  (contraseña: robot1234)
 //   2. Abrir navegador     →  http://192.168.4.1
 //
-// Conexiones Puente H (idénticas a control_remoto_puenteH):
-//   ENA GPIO 25 | ENB GPIO 26
-//   IN1 GPIO 27 | IN2 GPIO 18
-//   IN3 GPIO 19 | IN4 GPIO 14
-//   ENC_IZQ GPIO 32 | ENC_DER GPIO 34
+// Conexiones drivers BLDC WS55-220:
+//   SV_SIGNAL_IZQ GPIO 25 | SV_SIGNAL_DER GPIO 26
+//   FR_IZQ        GPIO 14 | FR_DER        GPIO 27
+//   ENC_IZQ       GPIO 32 | ENC_DER       GPIO 34
+//   (pull-up externo 10 kΩ a 3.3 V en GPIO 32 y GPIO 34)
 
 // ┌─────────────────────────────────────────────────────────────────────────┐
 // │  BLOQUE NUEVO — Librerías WiFi y Servidor Web Asíncrono                │
@@ -28,15 +28,15 @@ const char* AP_PASS = "robot1234";  // mín. 8 caracteres
 
 WebServer server(80);
 
-// ── Pines (mismos que control_remoto_puenteH) ─────────────────────────────
-#define ENA      25   // DAC → velocidad motor izquierdo
-#define ENB      26   // DAC → velocidad motor derecho
-#define IN1_IZQ  27   // Dirección izq (+)
-#define IN2_IZQ  18   // Dirección izq (−) complemento
-#define IN3_DER  19   // Dirección der (+)
-#define IN4_DER  14   // Dirección der (−) complemento
-#define ENC_IZQ  32
-#define ENC_DER  34
+// ── Pines (drivers BLDC WS55-220) ───────────────────────────────────────────
+#define SV_SIGNAL_IZQ  25   // DAC → velocidad motor izquierdo
+#define SV_SIGNAL_DER  26   // DAC → velocidad motor derecho
+#define FR_IZQ         14   // LOW = adelante, HIGH = atrás
+#define FR_DER         27   // HIGH = adelante, LOW = atrás  (lógica invertida)
+#define EN_IZQ         13   // OUTPUT+LOW = activo | INPUT = desactivado (alta impedancia)
+#define EN_DER         33   // idem
+#define ENC_IZQ        32
+#define ENC_DER        34
 
 // ── Parámetros de control ─────────────────────────────────────────────────
 #define PULSOS_MAX  98
@@ -61,18 +61,27 @@ static TeleData last_tele = {0, 0, 0, 0};
 // ── Estado motores ────────────────────────────────────────────────────────
 int dac_izq = 0, dac_der = 0;
 bool dir_prev_izq = true, dir_prev_der = true;
+bool motors_enabled = false;  // arranca DESACTIVADO — activar manualmente desde la GUI
 
-// ── Helpers dirección puente H ────────────────────────────────────────────
-void setDirIzq(bool adelante) {
-  digitalWrite(IN1_IZQ, adelante ? HIGH : LOW);
-  digitalWrite(IN2_IZQ, adelante ? LOW  : HIGH);
+// ── Habilitar / deshabilitar ambos motores a la vez ───────────────────────
+void enableMotores(bool on) {
+  if (on) {
+    pinMode(EN_IZQ, OUTPUT); digitalWrite(EN_IZQ, LOW);
+    pinMode(EN_DER, OUTPUT); digitalWrite(EN_DER, LOW);
+  } else {
+    dacWrite(SV_SIGNAL_IZQ, 0); dac_izq = 0;
+    dacWrite(SV_SIGNAL_DER, 0); dac_der = 0;
+    pinMode(EN_IZQ, INPUT);   // alta impedancia → driver se desactiva
+    pinMode(EN_DER, INPUT);
+  }
+  motors_enabled = on;
 }
-void setDirDer(bool adelante) {
-  digitalWrite(IN3_DER, adelante ? HIGH : LOW);
-  digitalWrite(IN4_DER, adelante ? LOW  : HIGH);
-}
-void frenarIzq() { digitalWrite(IN1_IZQ, LOW); digitalWrite(IN2_IZQ, LOW); dacWrite(ENA, 0); }
-void frenarDer() { digitalWrite(IN3_DER, LOW); digitalWrite(IN4_DER, LOW); dacWrite(ENB, 0); }
+
+// ── Helpers dirección WS55-220 ───────────────────────────────────────────────
+// FR_IZQ: LOW = adelante, HIGH = atrás
+// FR_DER: HIGH = adelante, LOW = atrás  (driver derecho tiene lógica invertida)
+void setDirIzq(bool adelante) { digitalWrite(FR_IZQ, adelante ? LOW  : HIGH); }
+void setDirDer(bool adelante) { digitalWrite(FR_DER, adelante ? HIGH : LOW);  }
 
 // ── Cinemática inversa diferencial ────────────────────────────────────────
 void cinematica(float vx, float vy, int &ref_izq, int &ref_der) {
@@ -91,14 +100,18 @@ void cinematica(float vx, float vy, int &ref_izq, int &ref_der) {
 void aplicarMotores(int ri, int rd) {
   bool dir_izq = (ri >= 0);
   bool dir_der = (rd >= 0);
-  if (dir_izq != dir_prev_izq) { frenarIzq(); dir_prev_izq = dir_izq; }
-  if (dir_der != dir_prev_der) { frenarDer(); dir_prev_der = dir_der; }
 
-  if (ri == 0) { frenarIzq(); dac_izq = 0; }
-  else { setDirIzq(ri > 0); dac_izq = map(abs(ri), 0, PULSOS_MAX, 0, 255); dacWrite(ENA, dac_izq); }
+  // Si cambia dirección: apagar DAC antes de invertir FR
+  if (dir_izq != dir_prev_izq) { dacWrite(SV_SIGNAL_IZQ, 0); dir_prev_izq = dir_izq; }
+  if (dir_der != dir_prev_der) { dacWrite(SV_SIGNAL_DER, 0); dir_prev_der = dir_der; }
 
-  if (rd == 0) { frenarDer(); dac_der = 0; }
-  else { setDirDer(rd > 0); dac_der = map(abs(rd), 0, PULSOS_MAX, 0, 255); dacWrite(ENB, dac_der); }
+  setDirIzq(dir_izq);
+  setDirDer(dir_der);
+
+  dac_izq = (ri == 0) ? 0 : map(abs(ri), 0, PULSOS_MAX, 0, 255);
+  dac_der = (rd == 0) ? 0 : map(abs(rd), 0, PULSOS_MAX, 0, 255);
+  dacWrite(SV_SIGNAL_IZQ, dac_izq);
+  dacWrite(SV_SIGNAL_DER, dac_der);
 }
 
 // HTML → definido en web_page.h (separado para evitar que el preprocesador
@@ -109,9 +122,13 @@ void setup() {
   Serial.begin(115200);
 
   // Pines motores
-  pinMode(IN1_IZQ, OUTPUT); pinMode(IN2_IZQ, OUTPUT);
-  pinMode(IN3_DER, OUTPUT); pinMode(IN4_DER, OUTPUT);
-  frenarIzq(); frenarDer();
+  pinMode(FR_IZQ, OUTPUT);
+  pinMode(FR_DER, OUTPUT);
+  setDirIzq(true);  // adelante por defecto
+  setDirDer(true);
+  dacWrite(SV_SIGNAL_IZQ, 0);
+  dacWrite(SV_SIGNAL_DER, 0);
+  enableMotores(false);  // desactivado por defecto — el usuario debe activar desde la GUI
 
   // Encoders
   attachInterrupt(digitalPinToInterrupt(ENC_IZQ), isr_izq, RISING);
@@ -151,6 +168,14 @@ void setup() {
                   ",\"pul_der\":" + String(last_tele.pul_der) +
                   ",\"dac_der\":" + String(last_tele.dac_d)   + "}";
     server.send(200, "application/json", json);
+  });
+
+  // Ruta /api/enable → activa o desactiva ambos motores
+  server.on("/api/enable", HTTP_POST, []() {
+    String body = server.arg("plain");
+    enableMotores(body.indexOf("true") >= 0);
+    server.send(200, "application/json",
+      String("{\"enabled\":") + (motors_enabled ? "true" : "false") + "}");
   });
 
   server.begin();
