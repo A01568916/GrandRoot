@@ -32,14 +32,11 @@ def leer_serial():
         try:
             linea  = ser.readline().decode(errors='ignore').strip()
             partes = linea.split(',')
-            if len(partes) == 6:
+            if len(partes) == 3:
                 d = {
-                    'pul_izq': float(partes[0]),
-                    'err_izq': float(partes[1]),
-                    'esf_izq': int(float(partes[2])),
-                    'pul_der': float(partes[3]),
-                    'err_der': float(partes[4]),
-                    'esf_der': int(float(partes[5])),
+                    'pul_der': float(partes[0]),
+                    'err_der': float(partes[1]),
+                    'esf_der': int(float(partes[2])),
                 }
                 with clientes_lock:
                     for q in list(clientes):
@@ -86,7 +83,7 @@ def api_send():
     global ref_valor
     data = request.get_json(silent=True) or {}
     try:
-        ref_valor = max(0.0, min(98.0, float(data.get('ref', 0))))
+        ref_valor = max(0.0, min(110.0, float(data.get('ref', 0))))
     except (ValueError, TypeError):
         return jsonify({'ok': False, 'error': 'valor inválido'}), 400
 
@@ -122,7 +119,7 @@ HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Control On/Off — Planta Llanta</title>
+<title>Control On/Off — Motor Derecho</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
@@ -239,7 +236,7 @@ header .sub{font-size:.78rem;color:var(--muted);margin-top:1px}
   <i class="bi bi-cpu-fill logo"></i>
   <div>
     <h1>Control On/Off</h1>
-    <div class="sub">Planta Llanta — ESP32</div>
+    <div class="sub">Motor Derecho — ESP32</div>
   </div>
   <span id="badge" class="badge-status">
     <span class="dot"></span>
@@ -260,39 +257,21 @@ header .sub{font-size:.78rem;color:var(--muted);margin-top:1px}
   <div class="divider-v"></div>
 
   <div class="ctrl-group">
-    <label><i class="bi bi-speedometer2"></i> Referencia (pulsos / 100 ms)</label>
-    <input id="inpRef" class="ref-input" type="number" value="0" min="0" max="98"
-           onkeydown="if(event.key==='Enter') enviar()">
+    <label><i class="bi bi-speedometer2"></i> Referencia (pulsos / 1000 ms)</label>
+    <input id="inpRef" class="ref-input" type="number" value="0" min="0" max="110"
+           onkeydown="if(event.key==='Enter') enviar()" max="110">
   </div>
   <button class="btn-send" onclick="enviar()">
     <i class="bi bi-send-fill"></i> Enviar
   </button>
 </div>
 
-<!-- Metric cards: izquierdo -->
+<!-- Metric cards: derecho -->
 <div class="metrics">
-  <div class="mcard" style="--card-accent:var(--accent)">
-    <div class="lbl"><i class="bi bi-circle-half"></i> Pulsos Izq</div>
-    <div class="val" id="vPI">0</div>
-    <div class="unit">por 100 ms</div>
-  </div>
-  <div class="mcard" style="--card-accent:var(--green)">
-    <div class="lbl"><i class="bi bi-activity"></i> Error Izq</div>
-    <div class="val" id="vEI">0</div>
-    <div class="unit">pulsos</div>
-  </div>
-  <div class="mcard" style="--card-accent:var(--yellow)">
-    <div class="lbl"><i class="bi bi-lightning-charge-fill"></i> DAC Izq</div>
-    <div class="val" id="vDI">0</div>
-    <div class="unit">0 – 255</div>
-  </div>
-
-  <div style="width:1px;background:var(--border);align-self:stretch;margin:4px 6px"></div>
-
   <div class="mcard" style="--card-accent:var(--accent2)">
-    <div class="lbl"><i class="bi bi-circle-half" style="transform:scaleX(-1);display:inline-block"></i> Pulsos Der</div>
+    <div class="lbl"><i class="bi bi-circle-half"></i> Pulsos Der</div>
     <div class="val" id="vPD">0</div>
-    <div class="unit">por 100 ms</div>
+    <div class="unit">por 1000 ms</div>
   </div>
   <div class="mcard" style="--card-accent:var(--green2)">
     <div class="lbl"><i class="bi bi-activity"></i> Error Der</div>
@@ -364,17 +343,14 @@ function mkChart(id, datasets) {
 }
 
 const cRef = mkChart('cRef', [
-  { label: 'Izquierdo', data: emptyArr(), borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,.07)', fill: true },
-  { label: 'Derecho',   data: emptyArr(), borderColor: '#79c0ff', backgroundColor: 'rgba(121,192,255,.04)', fill: true },
+  { label: 'Derecho',    data: emptyArr(), borderColor: '#f0883e', backgroundColor: 'rgba(240,136,62,.07)', fill: true },
   { label: 'Referencia', data: emptyArr(), borderColor: '#f85149', borderDash: [6,4], backgroundColor: 'transparent', borderWidth: 1.5 },
 ]);
 const cErr = mkChart('cErr', [
-  { label: 'Izquierdo', data: emptyArr(), borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,.07)', fill: true },
-  { label: 'Derecho',   data: emptyArr(), borderColor: '#56d364', backgroundColor: 'rgba(86,211,100,.04)', fill: true },
+  { label: 'Derecho', data: emptyArr(), borderColor: '#f0883e', backgroundColor: 'rgba(240,136,62,.07)', fill: true },
 ]);
 const cEsf = mkChart('cEsf', [
-  { label: 'Izquierdo', data: emptyArr(), borderColor: '#d29922', backgroundColor: 'rgba(210,153,34,.07)', fill: true },
-  { label: 'Derecho',   data: emptyArr(), borderColor: '#e3b341', backgroundColor: 'rgba(227,179,65,.04)', fill: true },
+  { label: 'Derecho', data: emptyArr(), borderColor: '#f0883e', backgroundColor: 'rgba(240,136,62,.07)', fill: true },
 ]);
 
 function push(chart, ...vals) {
@@ -393,15 +369,12 @@ let refActual = 0;
 const sse = new EventSource('/stream');
 sse.onmessage = e => {
   const d = JSON.parse(e.data);
-  document.getElementById('vPI').textContent = d.pul_izq;
-  document.getElementById('vEI').textContent = d.err_izq;
-  document.getElementById('vDI').textContent = d.esf_izq;
   document.getElementById('vPD').textContent = d.pul_der;
   document.getElementById('vED').textContent = d.err_der;
   document.getElementById('vDD').textContent = d.esf_der;
-  push(cRef, d.pul_izq, d.pul_der, refActual);
-  push(cErr, d.err_izq, d.err_der);
-  push(cEsf, d.esf_izq, d.esf_der);
+  push(cRef, d.pul_der, refActual);
+  push(cErr, d.err_der);
+  push(cEsf, d.esf_der);
 };
 
 // Puertos
@@ -446,7 +419,7 @@ async function toggleConexion() {
 
 // Enviar referencia
 async function enviar() {
-  refActual = Math.max(0, Math.min(98, parseFloat(document.getElementById('inpRef').value) || 0));
+  refActual = Math.max(0, Math.min(110, parseFloat(document.getElementById('inpRef').value) || 0));
   document.getElementById('inpRef').value = refActual;
   const r = await fetch('/api/send', {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -475,4 +448,4 @@ def index():
 
 if __name__ == '__main__':
     webbrowser.open('http://127.0.0.1:5000')
-    app.run(host='127.0.0.1', port=5000, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
