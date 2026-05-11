@@ -10,7 +10,7 @@ const char HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Control PID — Motor Derecho</title>
+<title>Control PID — Motores Derecho e Izquierdo</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
 <style>
 :root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#f0883e;--text:#e6edf3;--muted:#8b949e}
@@ -23,7 +23,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:1
 .brand-sub{font-size:11px;color:var(--muted)}
 #badge{font-size:12px;font-weight:600;padding:4px 12px;border-radius:20px;background:#21262d;color:var(--green);border:1px solid var(--border);display:flex;align-items:center;gap:6px}
 #badge::before{content:'';width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block}
-main{flex:1;padding:20px;display:grid;grid-template-columns:280px 1fr;gap:16px;align-items:start}
+main{flex:1;padding:20px;display:grid;grid-template-columns:280px 1fr;gap:16px}
 .col-left{display:flex;flex-direction:column;gap:12px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px}
 .card-title{font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:6px}
@@ -65,6 +65,14 @@ input[type=range]{width:100%;height:10px;accent-color:var(--accent);cursor:point
 .bar-pul{background:var(--green)}
 .bar-esf{background:var(--orange)}
 .bar-val{font-size:12px;font-weight:700;min-width:32px}
+.dir-pad{display:grid;grid-template-columns:56px 56px 56px;grid-template-rows:56px 56px 56px;gap:6px;margin:20px auto}
+.dir-btn{background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:24px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.1s;user-select:none}
+.dir-btn:active,.dir-btn.pressed{background:var(--accent);color:#0d1117}
+.speed-row{display:flex;align-items:center;gap:10px;margin:12px 0}
+.speed-row label{font-size:11px;color:var(--muted);white-space:nowrap}
+input[type=range]{flex:1;accent-color:var(--accent)}
+#speedVal{font-size:13px;font-weight:700;min-width:30px;text-align:right}
+.tele-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 </style>
 </head>
 <body>
@@ -72,7 +80,7 @@ input[type=range]{width:100%;height:10px;accent-color:var(--accent);cursor:point
   <div class="brand">
     <i class="bi bi-cpu brand-icon"></i>
     <div>
-      <div class="brand-title">Control PID — Motor Derecho</div>
+      <div class="brand-title">Control PID — Motor Derecho e Izquierdo</div>
       <div class="brand-sub">Planta Llanta — ESP32 &bull; 192.168.4.1</div>
     </div>
   </div>
@@ -83,7 +91,7 @@ input[type=range]{width:100%;height:10px;accent-color:var(--accent);cursor:point
   <!-- Columna izquierda -->
   <div class="col-left">
 
-    <!-- Motor enable -->
+    <!-- Motor enable - Control único -->
     <div class="card">
       <div class="card-title"><i class="bi bi-power"></i> Motor</div>
       <div id="estado-badge" class="estado-badge estado-detenido">⛔ MOTOR DETENIDO</div>
@@ -97,89 +105,96 @@ input[type=range]{width:100%;height:10px;accent-color:var(--accent);cursor:point
       </div>
     </div>
 
-    <!-- Telemetría -->
+    <!-- Velocidad máxima -->
     <div class="card">
-      <div class="card-title"><i class="bi bi-speedometer2"></i> Telemetría (cada 1 s)</div>
-      <div class="tele-grid">
-        <div class="tele-item ref">
-          <div class="tele-lbl">Referencia (pul)</div>
-          <div class="tele-val" id="tRef">0</div>
+      <div class="card-title" style="justify-content:center"><i class="bi bi-speedometer2"></i> Velocidad</div>
+      <div style="padding:10px">
+        <div style="font-size:36px;font-weight:900;color:var(--accent);text-align:center;margin-bottom:10px" id="speedDisplay">0</div>
+        <div class="speed-row">
+          <span style="font-size:11px">0</span>
+          <input type="range" id="speedSlider" min="0" max="100" value="0"
+            oninput="updateSpeed(this.value)">
+          <span style="font-size:11px">100</span>
         </div>
-        <div class="tele-item pul">
-          <div class="tele-lbl">Pulsos medidos</div>
-          <div class="tele-val" id="tPul">—</div>
-        </div>
-        <div class="tele-item err">
-          <div class="tele-lbl">Error</div>
-          <div class="tele-val" id="tErr">—</div>
-        </div>
-        <div class="tele-item esf">
-          <div class="tele-lbl">Esfuerzo (DAC)</div>
-          <div class="tele-val" id="tEsf">—</div>
-        </div>
+        <div style="text-align:center;font-size:12px;color:var(--muted);margin-top:8px">pul/s</div>
       </div>
     </div>
 
-    <!-- Ganancias PID -->
+    <!-- Control de dirección -->
     <div class="card">
-      <div class="card-title"><i class="bi bi-sliders"></i> Ganancias PID</div>
-      <div class="pid-grid">
-        <div class="pid-item"><div class="pid-lbl">Kp</div><div class="pid-val">0.800</div></div>
-        <div class="pid-item"><div class="pid-lbl">Ki</div><div class="pid-val">0.400</div></div>
-        <div class="pid-item"><div class="pid-lbl">Kd</div><div class="pid-val">0.040</div></div>
+      <div class="card-title" style="justify-content:center"><i class="bi bi-arrows-move"></i> Dirección</div>
+      <div class="dir-pad">
+        <div></div>
+        <div class="dir-btn" id="btn-up" onmousedown="dpad('up',true)" onmouseup="dpad('up',false)" ontouchstart="dpad('up',true)" ontouchend="dpad('up',false)"><i class="bi bi-arrow-up"></i></div>
+        <div></div>
+        <div class="dir-btn" id="btn-left" onmousedown="dpad('left',true)" onmouseup="dpad('left',false)" ontouchstart="dpad('left',true)" ontouchend="dpad('left',false)"><i class="bi bi-arrow-left"></i></div>
+        <div class="dir-btn" id="btn-stop" onclick="parar()" style="background:var(--red);font-size:20px"><i class="bi bi-stop-fill"></i></div>
+        <div class="dir-btn" id="btn-right" onmousedown="dpad('right',true)" onmouseup="dpad('right',false)" ontouchstart="dpad('right',true)" ontouchend="dpad('right',false)"><i class="bi bi-arrow-right"></i></div>
+        <div></div>
+        <div class="dir-btn" id="btn-down" onmousedown="dpad('down',true)" onmouseup="dpad('down',false)" ontouchstart="dpad('down',true)" ontouchend="dpad('down',false)"><i class="bi bi-arrow-down"></i></div>
+        <div></div>
       </div>
     </div>
 
   </div>
 
-  <!-- Columna derecha -->
-  <div class="col-right">
-
-    <!-- Control de referencia -->
+  <!-- Telemetría de ambos motores -->
+  <div class="tele-cols">
     <div class="card">
-      <div class="card-title" style="justify-content:center"><i class="bi bi-bullseye"></i> Referencia de velocidad</div>
-      <div class="ref-section">
-        <div>
-          <div class="ref-display" id="refDisplay">0</div>
-          <div class="ref-unit" style="text-align:center">pulsos / segundo</div>
+      <div class="card-title"><i class="bi bi-speedometer2"></i> Telemetría (Derecho)</div>
+      <div class="tele-grid">
+        <div class="tele-item ref">
+          <div class="tele-lbl">Referencia</div>
+          <div class="tele-val" id="tRef_d">0</div>
         </div>
-        <div class="slider-wrap">
-          <div class="slider-label"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
-          <input type="range" id="refSlider" min="0" max="100" value="0"
-            oninput="document.getElementById('refDisplay').textContent=this.value">
+        <div class="tele-item pul">
+          <div class="tele-lbl">Pulsos</div>
+          <div class="tele-val" id="tPul_d">—</div>
         </div>
-        <button class="send-btn" onclick="enviarRef()">
-          <i class="bi bi-send-fill"></i> Enviar referencia
-        </button>
-      </div>
-    </div>
-
-    <!-- Barras de estado -->
-    <div class="card">
-      <div class="card-title"><i class="bi bi-bar-chart-fill"></i> Estado visual</div>
-      <div style="padding:8px 0">
-        <div class="bar-row">
-          <span class="bar-label">Referencia</span>
-          <div class="bar-bg"><div class="bar-fill bar-ref" id="barRef" style="width:0%"></div></div>
-          <span class="bar-val" id="bvRef">0</span>
+        <div class="tele-item err">
+          <div class="tele-lbl">Error</div>
+          <div class="tele-val" id="tErr_d">—</div>
         </div>
-        <div class="bar-row">
-          <span class="bar-label">Pulsos</span>
-          <div class="bar-bg"><div class="bar-fill bar-pul" id="barPul" style="width:0%"></div></div>
-          <span class="bar-val" id="bvPul">0</span>
-        </div>
-        <div class="bar-row">
-          <span class="bar-label">Esfuerzo</span>
-          <div class="bar-bg"><div class="bar-fill bar-esf" id="barEsf" style="width:0%"></div></div>
-          <span class="bar-val" id="bvEsf">0</span>
+        <div class="tele-item esf">
+          <div class="tele-lbl">Esfuerzo</div>
+          <div class="tele-val" id="tEsf_d">—</div>
         </div>
       </div>
     </div>
-
+    <div class="card">
+      <div class="card-title"><i class="bi bi-speedometer2"></i> Telemetría (Izquierdo)</div>
+      <div class="tele-grid">
+        <div class="tele-item ref">
+          <div class="tele-lbl">Referencia</div>
+          <div class="tele-val" id="tRef_i">0</div>
+        </div>
+        <div class="tele-item pul">
+          <div class="tele-lbl">Pulsos</div>
+          <div class="tele-val" id="tPul_i">—</div>
+        </div>
+        <div class="tele-item err">
+          <div class="tele-lbl">Error</div>
+          <div class="tele-val" id="tErr_i">—</div>
+        </div>
+        <div class="tele-item esf">
+          <div class="tele-lbl">Esfuerzo</div>
+          <div class="tele-val" id="tEsf_i">—</div>
+        </div>
+      </div>
+    </div>
   </div>
 </main>
 
 <script>
+let motoresActivos = false;
+let dpadState = {up: false, down: false, left: false, right: false};
+let dpadTimer = null;
+
+function updateSpeed(val) {
+  document.getElementById('speedDisplay').textContent = val;
+  enviarMovimiento();
+}
+
 async function setEnable(on) {
   try {
     const r = await fetch('/api/enable', {
@@ -188,51 +203,95 @@ async function setEnable(on) {
       body: JSON.stringify({ on })
     });
     const j = await r.json();
+    motoresActivos = j.enabled;
     const badge = document.getElementById('estado-badge');
-    if (j.enabled) {
+    if (motoresActivos) {
       badge.className = 'estado-badge estado-activo';
       badge.textContent = '\u2705 MOTOR ACTIVO';
     } else {
       badge.className = 'estado-badge estado-detenido';
       badge.textContent = '\u26d4 MOTOR DETENIDO';
     }
+    if (!motoresActivos) parar();
   } catch(e) { console.error(e); }
 }
 
-async function enviarRef() {
-  const ref = parseInt(document.getElementById('refSlider').value);
+async function enviarMovimiento() {
+  if (!motoresActivos) return;
+  const spd = parseInt(document.getElementById('speedSlider').value) / 100;
+  let vx = 0, vy = 0;
+  
+  if (dpadState.up)    vx = spd;
+  if (dpadState.down)  vx = -spd;
+  if (dpadState.left)  vy = -spd;
+  if (dpadState.right) vy = spd;
+  
   try {
-    await fetch('/api/setref', {
+    const r = await fetch('/api/mover', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ref })
+      body: JSON.stringify({ vx, vy })
     });
+    const j = await r.json();
+    if (j.ok) {
+      document.getElementById('tRef_d').textContent = j.ref_der;
+      document.getElementById('tRef_i').textContent = j.ref_izq;
+    }
   } catch(e) { console.error(e); }
 }
 
-function setBar(barId, valId, value, max) {
-  const pct = Math.min(100, Math.round(value / max * 100));
-  document.getElementById(barId).style.width = pct + '%';
-  document.getElementById(valId).textContent = value;
+function parar() {
+  dpadState = {up: false, down: false, left: false, right: false};
+  document.getElementById('btn-up').classList.remove('pressed');
+  document.getElementById('btn-down').classList.remove('pressed');
+  document.getElementById('btn-left').classList.remove('pressed');
+  document.getElementById('btn-right').classList.remove('pressed');
+  clearInterval(dpadTimer);
+  enviarMovimiento();
 }
 
+function dpad(dir, pressed) {
+  dpadState[dir] = pressed;
+  document.getElementById('btn-' + dir).classList.toggle('pressed', pressed);
+  clearInterval(dpadTimer);
+  
+  if (Object.values(dpadState).some(Boolean)) {
+    enviarMovimiento();
+    dpadTimer = setInterval(enviarMovimiento, 100);
+  } else {
+    parar();
+  }
+}
+
+const keyMap = {ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right'};
+document.addEventListener('keydown', e => {
+  if (keyMap[e.key] && !dpadState[keyMap[e.key]]) {
+    e.preventDefault();
+    dpad(keyMap[e.key], true);
+  }
+  if (e.key === ' ') {
+    e.preventDefault();
+    parar();
+  }
+});
+document.addEventListener('keyup', e => {
+  if (keyMap[e.key]) {
+    e.preventDefault();
+    dpad(keyMap[e.key], false);
+  }
+});
+
 setInterval(() => {
-  fetch('/api/tele').then(r => r.json()).then(d => {
-    document.getElementById('tRef').textContent  = d.referencia;
-    document.getElementById('tPul').textContent  = d.pulsos;
-    document.getElementById('tErr').textContent  = d.error;
-    document.getElementById('tEsf').textContent  = d.esfuerzo;
-    setBar('barRef', 'bvRef', d.referencia, 100);
-    setBar('barPul', 'bvPul', d.pulsos,     100);
-    setBar('barEsf', 'bvEsf', d.esfuerzo,  255);
-    const badge = document.getElementById('estado-badge');
-    if (d.activo) {
-      badge.className = 'estado-badge estado-activo';
-      badge.textContent = '\u2705 MOTOR ACTIVO';
-    } else {
-      badge.className = 'estado-badge estado-detenido';
-      badge.textContent = '\u26d4 MOTOR DETENIDO';
-    }
+  fetch('/api/tele?motor=derecho').then(r => r.json()).then(d => {
+    document.getElementById('tPul_d').textContent = d.pulsos;
+    document.getElementById('tErr_d').textContent = d.error;
+    document.getElementById('tEsf_d').textContent = d.esfuerzo;
+  }).catch(() => {});
+  
+  fetch('/api/tele?motor=izquierdo').then(r => r.json()).then(d => {
+    document.getElementById('tPul_i').textContent = d.pulsos;
+    document.getElementById('tErr_i').textContent = d.error;
+    document.getElementById('tEsf_i').textContent = d.esfuerzo;
   }).catch(() => {});
 }, 1000);
 </script>
