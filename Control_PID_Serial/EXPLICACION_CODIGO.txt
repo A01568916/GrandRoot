@@ -1,0 +1,397 @@
+================================================================================
+EXPLICACIÓN COMPLETA - Control_PI_Posicional_SERIAL.ino
+Robot Diferencial con Control PI - Interfaz Serial USB
+================================================================================
+
+ÍNDICE:
+1. Pines del ESP32
+2. Parámetros del Sistema
+3. Variables Globales
+4. Estructuras de Datos
+5. Funciones Principales
+6. Flujo de Ejecución
+7. Ecuaciones Matemáticas
+
+================================================================================
+1. PINES DEL ESP32
+================================================================================
+
+SEÑALES DAC (Digital-to-Analog Converter) - Voltaje de Velocidad:
+  SV_SIGNAL_IZQ  = Pin 25 → Salida DAC para motor izquierdo (0-255 = 0-3.3V)
+  SV_SIGNAL_DER  = Pin 26 → Salida DAC para motor derecho (0-255 = 0-3.3V)
+
+DIRECCIONES (Digital Output):
+  FR_IZQ = Pin 14 → Control de dirección motor izquierdo
+           LOW  = adelante, HIGH = atrás
+  FR_DER = Pin 27 → Control de dirección motor derecho
+           HIGH = adelante, LOW  = atrás
+
+ENABLES (Digital Output) - Habilitación de motores:
+  EN_IZQ = Pin 13 → Enable motor izquierdo (LOW = habilitado, INPUT = deshabilitado)
+  EN_DER = Pin 33 → Enable motor derecho (LOW = habilitado, INPUT = deshabilitado)
+
+ENCODERS (Digital Input) - Lectura de velocidad:
+  ENC_IZQ = Pin 32 → Pulsos rueda izquierda (Interrupt)
+  ENC_DER = Pin 34 → Pulsos rueda derecha (Interrupt)
+
+================================================================================
+2. PARÁMETROS DEL SISTEMA
+================================================================================
+
+SAMPLE_MS = 200 ms
+  ├─ Tiempo de muestreo del controlador
+  ├─ Cada 200ms se ejecuta el loop de control
+  └─ Frecuencia: 5 Hz
+
+PULSOS_MAX = 22 pulsos/muestra
+  ├─ Referencia máxima de velocidad por rueda
+  ├─ Rango: -22 a +22 pulsos
+  ├─ Positive = adelante, Negative = atrás
+  └─ Se usa en cinemática diferencial
+
+R_RUEDA = 0.1397 metros (radio de rueda)
+L_BASE  = 1.12 metros (distancia entre ruedas)
+
+VMAX = 4.0 m/s (velocidad lineal máxima)
+WMAX = 2.0 rad/s (velocidad angular máxima)
+
+OMEGA_MAX = VMAX / R_RUEDA ≈ 28.6 rad/s
+  └─ Velocidad angular máxima de las ruedas
+
+CONTROLADOR PI:
+  kp = 6.0  → Ganancia proporcional
+              Amplifica el error actual
+              Cambios rápidos, pero puede oscilar si es muy alto
+  
+  ki = 3.0  → Ganancia integral
+              Acumula errores pasados
+              Elimina offset en estado estacionario
+              Cambios lentos
+
+================================================================================
+3. VARIABLES GLOBALES
+================================================================================
+
+serialBuffer = "" 
+  └─ Buffer para recibir comandos por serial
+     Se va llenando carácter a carácter hasta encontrar '\n'
+
+cnt_izq, cnt_der (volatile long)
+  ├─ Contadores de pulsos de encoders
+  ├─ Se incrementan en tiempo real por interrupciones
+  ├─ Se resetean después de leer cada 200ms
+  └─ volatile = se pueden cambiar en cualquier momento por ISR
+
+dir_actual_izq, dir_actual_der (bool)
+  ├─ Dirección actual de cada motor
+  ├─ true = adelante, false = atrás
+  ├─ Se usan para detectar cambio de dirección
+  └─ Si cambian de dirección, se detiene el motor antes de invertir
+
+motors_enabled (bool)
+  ├─ Indica si los motores están habilitados
+  ├─ false = pines EN en INPUT (deshabilitado)
+  ├─ true = pines EN en OUTPUT/LOW (habilitado)
+  └─ Comando: ENABLE,true o ENABLE,false
+
+t_prev (unsigned long)
+  ├─ Timestamp del último muestreo
+  ├─ Se usa para contar 200ms entre iteraciones
+  └─ millis() retorna ms desde el inicio
+
+================================================================================
+4. ESTRUCTURAS DE DATOS
+================================================================================
+
+ESTRUCTURA: TeleData (Datos de Telemetría)
+  long pul_izq        → Pulsos medidos rueda izquierda en último ciclo
+  long pul_der        → Pulsos medidos rueda derecha en último ciclo
+  int ref_i           → Referencia de velocidad motor izquierdo (-22 a +22)
+  int ref_d           → Referencia de velocidad motor derecho (-22 a +22)
+  float err_i         → Error actual motor izquierdo (ref - medida)
+  float err_d         → Error actual motor derecho (ref - medida)
+  int dac_i           → Salida DAC motor izquierdo (0-255)
+  int dac_d           → Salida DAC motor derecho (0-255)
+
+  INSTANCIA: last_tele
+  └─ Se actualiza cada 200ms y se envía por serial
+
+ESTRUCTURA: MotorState (Estado del Motor)
+  int ref             → Referencia de velocidad actual (-22 a +22)
+  long medida         → Pulsos medidos en último ciclo (con signo)
+  float error         → error = ref - medida
+  float integral      → Acumulador de errores (∫error·dt)
+  float u             → Salida del controlador PI (0-255)
+  int dac             → Valor discretizado para DAC (0-255)
+
+  INSTANCIAS: motor_i, motor_d
+  ├─ motor_i = {0, 0, 0.0f, 0.0f, 0.0f, 0} (izquierdo)
+  └─ motor_d = {0, 0, 0.0f, 0.0f, 0.0f, 0} (derecho)
+
+================================================================================
+5. FUNCIONES PRINCIPALES
+================================================================================
+
+FUNCIÓN: isr_izq() / isr_der()
+  ├─ Función de Interrupción (ISR - Interrupt Service Routine)
+  ├─ Se ejecuta cada vez que hay un pulso en el encoder
+  ├─ IRAM_ATTR = se ejecuta en RAM (rápido, sin latencia)
+  └─ Solo incrementa el contador: cnt_izq++ o cnt_der++
+
+FUNCIÓN: setDirIzq(bool adelante) / setDirDer(bool adelante)
+  ├─ Establece la dirección de cada motor
+  ├─ Usa digitalWrite() para escribir en pines FR_IZQ o FR_DER
+  └─ Lógica inversa entre motores (hardware del driver)
+
+FUNCIÓN: cinematica(float vx, float vy, int &ref_izq, int &ref_der)
+  ├─ Convierte velocidades Cartesianas a referencias de velocidad de ruedas
+  ├─ Entrada:
+  │  ├─ vx = velocidad lineal normalizada (-1 a +1)
+  │  ├─ vy = velocidad angular normalizada (-1 a +1, negativa = girar izq)
+  │  └─ ref_izq, ref_der = salidas (referencias calculadas)
+  │
+  ├─ Proceso:
+  │  1. Convierte a unidades reales: V = vx * VMAX, w = -vy * WMAX
+  │  2. Calcula velocidad angular de cada rueda (cinemática diferencial)
+  │  3. Normaliza si alguna rueda excede OMEGA_MAX
+  │  4. Convierte a pulsos (-22 a +22)
+  │
+  └─ Fórmulas:
+     omega_izq = V/R - (L/2R)*w   (movimiento diferencial)
+     omega_der = V/R + (L/2R)*w
+
+FUNCIÓN: aplicarMotores(int ri, int rd)
+  ├─ Aplica nuevas referencias de velocidad a los motores
+  ├─ Detiene motor si cambia de dirección (protección del driver)
+  ├─ Cambia pines de dirección (FR_IZQ, FR_DER)
+  ├─ Actualiza referencias en motor_i.ref y motor_d.ref
+  └─ Resetea controlador PI si hay cambio de dirección
+
+FUNCIÓN: enableMotores(bool on)
+  ├─ Habilita o deshabilita los motores
+  ├─ Si on = true:
+  │  ├─ Configura EN_IZQ y EN_DER como OUTPUT
+  │  └─ Escribe LOW (habilitado)
+  ├─ Si on = false:
+  │  ├─ Detiene DAC (escribe 0)
+  │  ├─ Configura EN_IZQ y EN_DER como INPUT (deshabilitado)
+  │  └─ Resetea controlador PI
+  └─ Actualiza variable global motors_enabled
+
+FUNCIÓN: procesarComando(String cmd)
+  ├─ Interpreta comandos recibidos por serial
+  │
+  ├─ Comando 1: ENABLE,true / ENABLE,false
+  │  └─ Llama enableMotores(on)
+  │
+  ├─ Comando 2: MOVE,vx,vy
+  │  ├─ Solo funciona si motors_enabled = true
+  │  ├─ Parsea vx y vy del string
+  │  ├─ Llama cinematica() para calcular referencias
+  │  ├─ Llama aplicarMotores() para enviar referencias
+  │  └─ Envía respuesta: REF,ri,rd
+  │
+  └─ Ejemplo: "MOVE,1.0,0.0" = adelante máximo
+
+FUNCIÓN: leerSerial()
+  ├─ Lee caracteres del puerto serial uno a uno
+  ├─ Acumula en serialBuffer hasta encontrar '\n'
+  ├─ Cuando encuentra '\n', llama procesarComando() y limpia buffer
+  └─ Se ejecuta en cada iteración del loop()
+
+================================================================================
+6. FLUJO DE EJECUCIÓN
+================================================================================
+
+SETUP (Al iniciar):
+  1. Inicializa Serial a 115200 baud
+  2. Configura pines de dirección como OUTPUT
+  3. Inicializa direcciones en adelante
+  4. Detiene DAC (escribe 0)
+  5. Deshabilita motores (EN en INPUT)
+  6. Configura interrupciones en encoders (RISING edge)
+  7. Guarda timestamp inicial en t_prev
+  8. Envía "ESP32 READY" por serial
+
+LOOP (Se ejecuta constantemente):
+  1. leerSerial() - Lee comandos del puerto
+  
+  2. Cada 200ms (SAMPLE_MS):
+     a) LEER ENCODERS:
+        - Desactiva interrupciones (cli)
+        - Copia cnt_izq y cnt_der a variables locales
+        - Resetea contadores a 0
+        - Reactiva interrupciones (sei)
+     
+     b) SIGNO LÓGICO:
+        - Aplica signo basado en dirección actual:
+          motor_i.medida = dir_actual_izq ? pi : -pi
+     
+     c) CONTROL PI (si motors_enabled = true):
+        - Para cada motor:
+          i.   error = ref - medida
+          ii.  integral += error * T (acumula error)
+          iii. integral se limita entre -100 y +100
+          iv.  u = kp * error + ki * integral
+          v.   u se limita entre 0 y 255 (rango DAC)
+          vi.  Escribe u en DAC
+     
+     d) TELEMETRÍA:
+        - Guarda estado en estructura last_tele
+        - Envía por serial: TEL,pul_i,pul_d,ref_i,ref_d,err_i,err_d,dac_i,dac_d
+
+================================================================================
+7. ECUACIONES MATEMÁTICAS
+================================================================================
+
+ECUACIÓN PI (Control):
+  error = referencia - medida
+  
+  integral = integral_anterior + (error * T)
+  
+  u = kp * error + ki * integral
+  
+  Donde:
+  - kp = 6.0 → Respuesta a error actual
+  - ki = 3.0 → Corrección lenta de offset
+  - T = 0.2 s → Período de muestreo
+  
+  Interpretación:
+  - Si error > 0: motor va lento, acelera
+  - Si error < 0: motor va rápido, frena
+  - integral acumula para eliminar pequeños errores
+
+CINEMÁTICA DIFERENCIAL:
+  V = velocidad lineal (m/s)
+  w = velocidad angular (rad/s)
+  R = radio de rueda
+  L = distancia entre ruedas
+  
+  omega_izq = V/R - (L/2R)*w
+  omega_der = V/R + (L/2R)*w
+  
+  Ejemplo:
+  - Si w=0: ambas ruedas giran igual → movimiento recto
+  - Si V=0, w>0: izq gira atrás, der adelante → gira en el sitio
+
+RANGO DE PULSOS:
+  PULSOS_MAX = 22
+  Rango: -22 a +22
+  
+  Positivo → adelante
+  Negativo → atrás
+  0 → parado
+  
+  Se mapea de -1 a +1 (entrada del controlador)
+
+================================================================================
+COMUNICACIÓN SERIAL
+================================================================================
+
+RECIBE (desde GUI):
+  ENABLE,true      → Habilita motores
+  ENABLE,false     → Deshabilita motores
+  MOVE,vx,vy       → Mueve robot (vx, vy normalizados -1 a +1)
+
+ENVÍA (hacia GUI):
+  ESP32 READY      → Al iniciar
+  ENABLE,true/false → Confirmación de comando
+  REF,ri,rd        → Referencias calculadas
+  TEL,...          → Telemetría cada 200ms
+
+FORMATO TELEMETRÍA:
+  TEL,pul_i,pul_d,ref_i,ref_d,err_i,err_d,dac_i,dac_d
+  
+  Ejemplo:
+  TEL,5,6,10,10,-5.0,-4.0,120,125
+  
+  Significa:
+  - Pulsos izq: 5, Pulsos der: 6
+  - Ref izq: 10, Ref der: 10
+  - Error izq: -5.0, Error der: -4.0
+  - DAC izq: 120, DAC der: 125
+
+================================================================================
+PROTECCIONES Y CARACTERÍSTICAS
+================================================================================
+
+1. CAMBIO DE DIRECCIÓN:
+   - Antes de cambiar dirección, se detiene el motor (DAC = 0)
+   - Se resetea el controlador integral para evitar sobreoscilación
+   
+2. SATURACIÓN DAC:
+   - Valores limitados entre 0 y 255 (rango del DAC de 8 bits)
+   - Valores negativos se convierten a positivos con fabsf()
+   - Si u > 255, se limita a 255
+   
+3. INTEGRAL ACOTADA:
+   - Rango: -100 a +100
+   - Evita que se acumule infinitamente
+   - Previene grandes transitorios
+   
+4. VELOCIDADES NORMALIZADAS:
+   - Entrada vx, vy: -1 a +1
+   - Se convierten internamente a m/s y rad/s
+   - Se normaliza si alguna rueda excede max
+   
+5. INTERRUPPCIONES:
+   - Los encoders funcionan sin latencia
+   - Se suspenden interrupciones solo durante lectura (muy breve)
+   - Permite contar pulsos sin pérdidas
+
+================================================================================
+EJEMPLO DE FUNCIONAMIENTO
+================================================================================
+
+Escenario: Usuario presiona botón "ADELANTE" en GUI
+
+1. GUI envía: "MOVE,1.0,0.0"
+2. ESP32 recibe y parsea: vx=1.0, vy=0.0
+3. cinematica(1.0, 0.0) calcula:
+   V = 1.0 * 4.0 = 4.0 m/s
+   w = -0.0 * 2.0 = 0 rad/s
+   omega_izq = 4.0/0.1397 - 0 ≈ 28.6 rad/s
+   omega_der = 4.0/0.1397 + 0 ≈ 28.6 rad/s
+   (normaliza) → ref_izq = 22, ref_der = 22
+4. aplicarMotores(22, 22) establece referencias
+5. Cada 200ms:
+   - Se leen encoders (ej: 15 pulsos cada uno)
+   - error_izq = 22 - 15 = 7
+   - error_der = 22 - 15 = 7
+   - PI calcula u ≈ 180
+   - DAC escribe 180 → motor recibe 180/255 * 3.3V ≈ 2.33V
+   - Motor acelera hasta alcanzar ~22 pulsos/ciclo
+6. Cuando error ≈ 0, mantiene DAC constante
+7. Telemetría se envía a GUI con todos estos valores
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+PROBLEMA: No funciona nada
+→ Verificar "ESP32 READY" en serial
+→ Revisar baudrate (debe ser 115200)
+→ Comprobar pines (ver lista en sección 1)
+
+PROBLEMA: Motor no se mueve
+→ ¿motors_enabled = true? (enviar ENABLE,true)
+→ ¿Referencia es cero? (MOVE debe tener vx o vy ≠ 0)
+→ ¿Driver habilitado? (pin EN debe estar LOW)
+
+PROBLEMA: Motor oscila
+→ kp muy alto → reducir de 6.0 a 4.0
+→ ki muy alto → reducir de 3.0 a 1.5
+
+PROBLEMA: Motor muy lento
+→ kp muy bajo → aumentar
+→ ki muy bajo → aumentar
+→ Verificar que referencia no sea cero
+
+PROBLEMA: No hay telemetría en GUI
+→ Verificar conexión serial y baudrate
+→ Revisar que motors_enabled = true
+→ Comprobar que Python está leyendo puerto correcto
+
+================================================================================
+FIN DE LA DOCUMENTACIÓN
+================================================================================

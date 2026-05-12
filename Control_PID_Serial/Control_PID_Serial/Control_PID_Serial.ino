@@ -41,7 +41,7 @@ const float R_RUEDA = 0.1397f;
 const float L_BASE  = 1.12f;
 
 const float VMAX = 4.0f;
-const float WMAX = 0.8f;
+const float WMAX = 2.0f;
 
 const float OMEGA_MAX =
     VMAX / R_RUEDA;
