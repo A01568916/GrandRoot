@@ -1,0 +1,21 @@
+{
+  "fecha_entrenamiento": "2026-05-12T11:12:58.347401",
+  "arquitectura": "U-Net",
+  "img_size": [
+    128,
+    128
+  ],
+  "batch_size": 8,
+  "epochs_entrenados": 40,
+  "learning_rate": 1e-05,
+  "fotos_utilizadas": 127,
+  "estrategia": "Fine-tuning con pseudo-etiquetas",
+  "perdida_final_train": 0.5689172148704529,
+  "perdida_final_val": 0.5391876697540283,
+  "dice_final_val": 0.541082501411438,
+  "metricas": {
+    "dice_coef": "Coeficiente Dice (F1 para segmentaci\u00f3n)",
+    "iou_metric": "Intersecci\u00f3n sobre Uni\u00f3n",
+    "bce_dice_loss": "BCElosses + Dice Loss"
+  }
+}
