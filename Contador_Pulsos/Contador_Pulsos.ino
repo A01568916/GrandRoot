@@ -1,12 +1,12 @@
-#define SV_SIGNAL_IZQ 25
-#define SV_SIGNAL_DER 26
-#define EN_DER 33
-#define EN_IZQ 13
-#define FR_DER 27
-#define FR_IZQ 14
-
-#define ENC_DER 32
-#define ENC_IZQ 12
+// ── Pines (drivers BLDC WS55-220) ───────────────────────────────────────────
+#define SV_SIGNAL_IZQ  25   // DAC → velocidad motor izquierdo
+#define SV_SIGNAL_DER  26   // DAC → velocidad motor derecho
+#define FR_IZQ         14   // LOW = adelante, HIGH = atrás
+#define FR_DER         27   // HIGH = adelante, LOW = atrás  (lógica invertida)
+#define EN_IZQ         13   // OUTPUT+LOW = activo | INPUT = desactivado
+#define EN_DER         33   // idem
+#define ENC_IZQ        32
+#define ENC_DER        34
 
 volatile int pulsosDer = 0;
 volatile int pulsosIzq = 0;

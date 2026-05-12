@@ -11,14 +11,17 @@
  * Imprime cada 1000 ms:  t_ms, pulsos_izq, pulsos_der
  */
 
-#define DAC_IZQ   25
-#define DAC_DER   26
-#define ENC_IZQ   34
-#define ENC_DER   32
-#define FR_IZQ    14
-#define FR_DER    27
+// ── Pines (drivers BLDC WS55-220) ───────────────────────────────────────────
+#define DAC_IZQ  25   // DAC → velocidad motor izquierdo
+#define DAC_DER  26   // DAC → velocidad motor derecho
+#define FR_IZQ         14   // LOW = adelante, HIGH = atrás
+#define FR_DER         27   // HIGH = adelante, LOW = atrás  (lógica invertida)
+#define EN_IZQ         13   // OUTPUT+LOW = activo | INPUT = desactivado
+#define EN_DER         33   // idem
+#define ENC_IZQ        32
+#define ENC_DER        34
 
-#define SAMPLE_MS  1000
+#define SAMPLE_MS  200
 #define ARRANQUE_MS 2000   // tiempo en 0 V antes de arrancar
 
 volatile long pulsosIzq = 0;

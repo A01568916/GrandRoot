@@ -10,10 +10,10 @@
 
 // ===== CONSTANTES =====
 const float DIST_POR_PULSO = 0.0585; // metros
-const int STEP_DAC = 10;
-const int MAX_DAC = 250;
+const int STEP_DAC = 5;
+const int MAX_DAC = 100;
 
-const int TIEMPO_MEDICION = 4000; // ms
+const int TIEMPO_MEDICION = 1000; // ms
 const int TIEMPO_RESET = 300;     // ms (ajustable)
 
 // Pulsos
