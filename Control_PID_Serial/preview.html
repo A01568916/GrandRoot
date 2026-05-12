@@ -1,0 +1,1206 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Control PID — Motores Derecho e Izquierdo</title>
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+<style>
+:root{
+--bg:#0d1117;
+--surface:#161b22;
+--surface2:#1c2128;
+--border:#30363d;
+--accent:#58a6ff;
+--green:#3fb950;
+--red:#f85149;
+--orange:#f0883e;
+--text:#e6edf3;
+--muted:#8b949e
+}
+
+*{
+box-sizing:border-box;
+margin:0;
+padding:0
+}
+
+body{
+background:var(--bg);
+color:var(--text);
+font-family:'Segoe UI',system-ui,sans-serif;
+min-height:100vh;
+display:flex;
+flex-direction:column
+}
+
+header{
+background:var(--surface);
+border-bottom:1px solid var(--border);
+padding:12px 20px;
+display:flex;
+align-items:center;
+justify-content:space-between
+}
+
+.brand{
+display:flex;
+align-items:center;
+gap:10px
+}
+
+.brand-icon{
+font-size:22px;
+color:var(--accent)
+}
+
+.brand-title{
+font-size:16px;
+font-weight:700
+}
+
+.brand-sub{
+font-size:11px;
+color:var(--muted)
+}
+
+#badge{
+font-size:12px;
+font-weight:600;
+padding:4px 12px;
+border-radius:20px;
+background:#21262d;
+color:var(--green);
+border:1px solid var(--border);
+display:flex;
+align-items:center;
+gap:6px
+}
+
+#badge::before{
+content:'';
+width:8px;
+height:8px;
+border-radius:50%;
+background:currentColor;
+display:inline-block
+}
+
+main{
+flex:1;
+padding:20px;
+display:grid;
+grid-template-columns:280px 1fr;
+gap:16px
+}
+
+.col-left{
+display:flex;
+flex-direction:column;
+gap:12px
+}
+
+.card{
+background:var(--surface);
+border:1px solid var(--border);
+border-radius:10px;
+padding:14px
+}
+
+.card-title{
+font-size:10px;
+font-weight:700;
+letter-spacing:.08em;
+color:var(--muted);
+text-transform:uppercase;
+margin-bottom:10px;
+display:flex;
+align-items:center;
+gap:6px
+}
+
+.estado-badge{
+text-align:center;
+padding:8px 10px;
+border-radius:6px;
+font-size:13px;
+font-weight:700;
+margin-bottom:10px
+}
+
+.estado-detenido{
+background:#3d1f1e;
+color:var(--red);
+border:1px solid #da3633
+}
+
+.estado-activo{
+background:#1a2f1a;
+color:var(--green);
+border:1px solid #238636
+}
+
+.btn-row{
+display:flex;
+gap:8px
+}
+
+.btn-enable{
+flex:1;
+padding:10px;
+border:none;
+border-radius:8px;
+font-size:13px;
+font-weight:700;
+cursor:pointer;
+transition:.15s;
+letter-spacing:.04em
+}
+
+.btn-activar{
+background:#238636;
+color:#fff
+}
+
+.btn-activar:hover{
+background:#2ea043
+}
+
+.btn-paro{
+background:#da3633;
+color:#fff
+}
+
+.btn-paro:hover{
+background:#f85149
+}
+
+.tele-grid{
+display:grid;
+grid-template-columns:1fr 1fr;
+gap:8px
+}
+
+.tele-item{
+background:var(--surface2);
+border-radius:8px;
+padding:10px 12px;
+border-left:3px solid var(--border)
+}
+
+.tele-item.pul{
+border-left-color:var(--accent)
+}
+
+.tele-item.err{
+border-left-color:var(--orange)
+}
+
+.tele-item.esf{
+border-left-color:var(--green)
+}
+
+.tele-item.ref{
+border-left-color:#a371f7
+}
+
+.tele-lbl{
+font-size:10px;
+color:var(--muted);
+margin-bottom:3px
+}
+
+.tele-val{
+font-size:22px;
+font-weight:700
+}
+
+.ref-section{
+display:flex;
+flex-direction:column;
+align-items:center;
+gap:20px;
+padding:20px
+}
+
+.dir-pad{
+display:grid;
+grid-template-columns:56px 56px 56px;
+grid-template-rows:56px 56px 56px;
+gap:6px;
+margin:20px auto
+}
+
+.dir-btn{
+background:var(--surface2);
+border:1px solid var(--border);
+border-radius:8px;
+color:var(--text);
+font-size:24px;
+cursor:pointer;
+display:flex;
+align-items:center;
+justify-content:center;
+transition:.1s;
+user-select:none
+}
+
+.dir-btn:active,
+.dir-btn.pressed{
+background:var(--accent);
+color:#0d1117
+}
+
+.speed-row{
+display:flex;
+align-items:center;
+gap:10px;
+margin:12px 0
+}
+
+.speed-row label{
+font-size:11px;
+color:var(--muted);
+white-space:nowrap
+}
+
+input[type=range]{
+flex:1;
+accent-color:var(--accent)
+}
+
+.tele-cols{
+display:grid;
+grid-template-columns:1fr 1fr;
+gap:12px
+}
+
+.charts{
+display:flex;
+flex-direction:column;
+gap:14px;
+margin-top:20px
+}
+
+.chart-card{
+background:var(--surface);
+border:1px solid var(--border);
+border-radius:10px;
+padding:18px 22px
+}
+
+.chart-card .ch-header{
+display:flex;
+align-items:center;
+gap:9px;
+margin-bottom:14px
+}
+
+.chart-card .ch-title{
+font-size:10px;
+font-weight:700;
+letter-spacing:.08em;
+color:var(--muted);
+text-transform:uppercase
+}
+
+.chart-card canvas{
+max-height:140px
+}
+
+.serial-btn{
+width:100%;
+padding:12px;
+border:none;
+border-radius:8px;
+background:var(--accent);
+color:#0d1117;
+font-weight:800;
+font-size:13px;
+cursor:pointer;
+margin-bottom:10px
+}
+
+.serial-btn:hover{
+background:#79c0ff
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <div class="brand">
+    <i class="bi bi-cpu brand-icon"></i>
+    <div>
+      <div class="brand-title">
+        Control PID — Motor Derecho e Izquierdo
+      </div>
+
+      <div class="brand-sub">
+        ESP32 Serial USB
+      </div>
+    </div>
+  </div>
+
+  <div id="badge">
+    <span id="serialStatus">
+      Serial Desconectado
+    </span>
+  </div>
+</header>
+
+<main>
+
+<div class="col-left">
+
+<div class="card">
+
+<div class="card-title">
+<i class="bi bi-usb-symbol"></i>
+Conexión Serial
+</div>
+
+<button class="serial-btn"
+onclick="connectSerial()">
+
+<i class="bi bi-plug-fill"></i>
+CONECTAR SERIAL
+
+</button>
+
+</div>
+
+<div class="card">
+
+<div class="card-title">
+<i class="bi bi-power"></i>
+Motor
+</div>
+
+<div id="estado-badge"
+class="estado-badge estado-detenido">
+
+⛔ MOTOR DETENIDO
+
+</div>
+
+<div class="btn-row">
+
+<button class="btn-enable btn-activar"
+onclick="setEnable(true)">
+
+<i class="bi bi-play-fill"></i>
+ACTIVAR
+
+</button>
+
+<button class="btn-enable btn-paro"
+onclick="setEnable(false)">
+
+<i class="bi bi-stop-fill"></i>
+PARO
+
+</button>
+
+</div>
+</div>
+
+<div class="card">
+
+<div class="card-title"
+style="justify-content:center">
+
+<i class="bi bi-speedometer2"></i>
+Velocidad
+
+</div>
+
+<div style="padding:10px">
+
+<div style="
+font-size:36px;
+font-weight:900;
+color:var(--accent);
+text-align:center;
+margin-bottom:10px"
+id="speedDisplay">
+
+0
+
+</div>
+
+<div class="speed-row">
+
+<span style="font-size:11px">0</span>
+
+<input type="range"
+id="speedSlider"
+min="0"
+max="22"
+value="0"
+oninput="updateSpeed(this.value)">
+
+<span style="font-size:11px">22</span>
+
+</div>
+
+<div style="
+text-align:center;
+font-size:12px;
+color:var(--muted);
+margin-top:8px">
+
+pul/s
+
+</div>
+
+</div>
+
+</div>
+
+<div class="card">
+
+<div class="card-title"
+style="justify-content:center">
+
+<i class="bi bi-arrows-move"></i>
+Dirección
+
+</div>
+
+<div class="dir-pad">
+
+<div></div>
+
+<div class="dir-btn"
+id="btn-up"
+onmousedown="dpad('up',true)"
+onmouseup="dpad('up',false)"
+ontouchstart="dpad('up',true)"
+ontouchend="dpad('up',false)">
+
+<i class="bi bi-arrow-up"></i>
+
+</div>
+
+<div></div>
+
+<div class="dir-btn"
+id="btn-left"
+onmousedown="dpad('left',true)"
+onmouseup="dpad('left',false)"
+ontouchstart="dpad('left',true)"
+ontouchend="dpad('left',false)">
+
+<i class="bi bi-arrow-left"></i>
+
+</div>
+
+<div class="dir-btn"
+id="btn-stop"
+onclick="parar()"
+style="background:var(--red);font-size:20px">
+
+<i class="bi bi-stop-fill"></i>
+
+</div>
+
+<div class="dir-btn"
+id="btn-right"
+onmousedown="dpad('right',true)"
+onmouseup="dpad('right',false)"
+ontouchstart="dpad('right',true)"
+ontouchend="dpad('right',false)">
+
+<i class="bi bi-arrow-right"></i>
+
+</div>
+
+<div></div>
+
+<div class="dir-btn"
+id="btn-down"
+onmousedown="dpad('down',true)"
+onmouseup="dpad('down',false)"
+ontouchstart="dpad('down',true)"
+ontouchend="dpad('down',false)">
+
+<i class="bi bi-arrow-down"></i>
+
+</div>
+
+<div></div>
+
+</div>
+
+</div>
+
+</div>
+
+<div class="tele-cols">
+
+<div class="card">
+
+<div class="card-title">
+<i class="bi bi-speedometer2"></i>
+Telemetría (Derecho)
+</div>
+
+<div class="tele-grid">
+
+<div class="tele-item ref">
+<div class="tele-lbl">Referencia</div>
+<div class="tele-val" id="tRef_d">0</div>
+</div>
+
+<div class="tele-item pul">
+<div class="tele-lbl">Pulsos</div>
+<div class="tele-val" id="tPul_d">—</div>
+</div>
+
+<div class="tele-item err">
+<div class="tele-lbl">Error</div>
+<div class="tele-val" id="tErr_d">—</div>
+</div>
+
+<div class="tele-item esf">
+<div class="tele-lbl">Esfuerzo</div>
+<div class="tele-val" id="tEsf_d">—</div>
+</div>
+
+</div>
+</div>
+
+<div class="card">
+
+<div class="card-title">
+<i class="bi bi-speedometer2"></i>
+Telemetría (Izquierdo)
+</div>
+
+<div class="tele-grid">
+
+<div class="tele-item ref">
+<div class="tele-lbl">Referencia</div>
+<div class="tele-val" id="tRef_i">0</div>
+</div>
+
+<div class="tele-item pul">
+<div class="tele-lbl">Pulsos</div>
+<div class="tele-val" id="tPul_i">—</div>
+</div>
+
+<div class="tele-item err">
+<div class="tele-lbl">Error</div>
+<div class="tele-val" id="tErr_i">—</div>
+</div>
+
+<div class="tele-item esf">
+<div class="tele-lbl">Esfuerzo</div>
+<div class="tele-val" id="tEsf_i">—</div>
+</div>
+
+</div>
+</div>
+
+</div>
+
+</main>
+
+<div style="
+padding:20px 20px 40px;
+max-width:1200px;
+margin:0 auto;
+width:100%">
+
+<div class="charts">
+
+<div class="chart-card">
+
+<div class="ch-header">
+<i class="bi bi-graph-up-arrow"
+style="color:var(--accent);font-size:1.1rem"></i>
+
+<span class="ch-title">
+Referencia vs Medida (Derecho)
+</span>
+</div>
+
+<canvas id="cRef_d"></canvas>
+
+</div>
+
+<div class="chart-card">
+
+<div class="ch-header">
+<i class="bi bi-graph-up-arrow"
+style="color:var(--accent);font-size:1.1rem"></i>
+
+<span class="ch-title">
+Referencia vs Medida (Izquierdo)
+</span>
+</div>
+
+<canvas id="cRef_i"></canvas>
+
+</div>
+
+<div class="chart-card">
+
+<div class="ch-header">
+<i class="bi bi-activity"
+style="color:var(--green);font-size:1.1rem"></i>
+
+<span class="ch-title">
+Error
+</span>
+
+</div>
+
+<canvas id="cErr"></canvas>
+
+</div>
+
+<div class="chart-card">
+
+<div class="ch-header">
+<i class="bi bi-lightning-fill"
+style="color:var(--orange);font-size:1.1rem"></i>
+
+<span class="ch-title">
+Esfuerzo (DAC)
+</span>
+
+</div>
+
+<canvas id="cEsf"></canvas>
+
+</div>
+
+</div>
+
+</div>
+
+<script>
+
+// =====================================================
+// SERIAL
+// =====================================================
+
+let port;
+let writer;
+
+async function connectSerial(){
+
+  try{
+
+    port =
+      await navigator.serial.requestPort();
+
+    await port.open({
+      baudRate:115200
+    });
+
+    writer =
+      port.writable.getWriter();
+
+    document.getElementById(
+      'serialStatus'
+    ).textContent =
+      'Serial Conectado';
+
+    readSerial();
+
+  }catch(e){
+
+    console.error(e);
+  }
+}
+
+async function sendSerial(txt){
+
+  if(!writer) return;
+
+  await writer.write(
+    new TextEncoder().encode(
+      txt + "\n"
+    )
+  );
+}
+
+async function readSerial(){
+
+  const reader =
+    port.readable.getReader();
+
+  while(true){
+
+    const {value, done} =
+      await reader.read();
+
+    if(done) break;
+
+    const text =
+      new TextDecoder().decode(value);
+
+    parseSerial(text);
+  }
+}
+
+// =====================================================
+// PARSER SERIAL
+// =====================================================
+
+function parseSerial(data){
+
+  const lines =
+    data.split('\n');
+
+  lines.forEach(line=>{
+
+    line = line.trim();
+
+    if(
+      !line.startsWith("TEL,")
+    ) return;
+
+    const p =
+      line.split(",");
+
+    const pi   = Number(p[1]);
+    const pd   = Number(p[2]);
+
+    const ri   = Number(p[3]);
+    const rd   = Number(p[4]);
+
+    const ei   = Number(p[5]);
+    const ed   = Number(p[6]);
+
+    const daci = Number(p[7]);
+    const dacd = Number(p[8]);
+
+    document.getElementById(
+      'tPul_i'
+    ).textContent = pi;
+
+    document.getElementById(
+      'tPul_d'
+    ).textContent = pd;
+
+    document.getElementById(
+      'tRef_i'
+    ).textContent = ri;
+
+    document.getElementById(
+      'tRef_d'
+    ).textContent = rd;
+
+    document.getElementById(
+      'tErr_i'
+    ).textContent = ei.toFixed(1);
+
+    document.getElementById(
+      'tErr_d'
+    ).textContent = ed.toFixed(1);
+
+    document.getElementById(
+      'tEsf_i'
+    ).textContent = daci;
+
+    document.getElementById(
+      'tEsf_d'
+    ).textContent = dacd;
+
+    push(cRef_d, rd, pd);
+    push(cRef_i, ri, pi);
+
+    push(cErr, ed, ei);
+
+    push(cEsf, dacd, daci);
+  });
+}
+
+// =====================================================
+// GRÁFICAS
+// =====================================================
+
+const BUFFER = 150;
+
+const emptyArr = () =>
+  Array(BUFFER).fill(null);
+
+Chart.defaults.color =
+  '#8b949e';
+
+Chart.defaults.borderColor =
+  '#21262d';
+
+function mkChart(id, datasets){
+
+  return new Chart(
+    document.getElementById(id),
+    {
+
+    type:'line',
+
+    data:{
+      labels:emptyArr(),
+      datasets
+    },
+
+    options:{
+      animation:false,
+      responsive:true,
+      maintainAspectRatio:true,
+
+      interaction:{
+        mode:'index',
+        intersect:false
+      },
+
+      plugins:{
+        legend:{
+          position:'top',
+
+          labels:{
+            boxWidth:10,
+            padding:12,
+            usePointStyle:true,
+
+            font:{size:11}
+          }
+        }
+      },
+
+      scales:{
+
+        x:{
+          display:false
+        },
+
+        y:{
+          grid:{
+            color:'#21262d'
+          },
+
+          ticks:{
+            color:'#8b949e',
+            font:{size:10}
+          }
+        }
+      },
+
+      elements:{
+        point:{radius:0},
+
+        line:{
+          borderWidth:1.5,
+          tension:0.3
+        }
+      }
+    }
+  });
+}
+
+const cRef_d = mkChart('cRef_d',[
+{
+label:'Referencia',
+data:emptyArr(),
+borderColor:'#a371f7',
+backgroundColor:'rgba(163,113,247,.07)',
+fill:true,
+borderDash:[6,4],
+borderWidth:1
+},
+{
+label:'Medida',
+data:emptyArr(),
+borderColor:'#f0883e',
+backgroundColor:'rgba(240,136,62,.07)',
+fill:true
+}
+]);
+
+const cRef_i = mkChart('cRef_i',[
+{
+label:'Referencia',
+data:emptyArr(),
+borderColor:'#a371f7',
+backgroundColor:'rgba(163,113,247,.07)',
+fill:true,
+borderDash:[6,4],
+borderWidth:1
+},
+{
+label:'Medida',
+data:emptyArr(),
+borderColor:'#79c0ff',
+backgroundColor:'rgba(121,192,255,.07)',
+fill:true
+}
+]);
+
+const cErr = mkChart('cErr',[
+{
+label:'Derecho',
+data:emptyArr(),
+borderColor:'#f0883e',
+backgroundColor:'rgba(240,136,62,.07)',
+fill:true
+},
+{
+label:'Izquierdo',
+data:emptyArr(),
+borderColor:'#79c0ff',
+backgroundColor:'rgba(121,192,255,.07)',
+fill:true
+}
+]);
+
+const cEsf = mkChart('cEsf',[
+{
+label:'Derecho',
+data:emptyArr(),
+borderColor:'#f0883e',
+backgroundColor:'rgba(240,136,62,.07)',
+fill:true
+},
+{
+label:'Izquierdo',
+data:emptyArr(),
+borderColor:'#79c0ff',
+backgroundColor:'rgba(121,192,255,.07)',
+fill:true
+}
+]);
+
+function push(chart,...vals){
+
+  vals.forEach((v,i)=>{
+
+    chart.data.datasets[i]
+    .data.push(v);
+
+    if(
+      chart.data.datasets[i]
+      .data.length > BUFFER
+    ){
+      chart.data.datasets[i]
+      .data.shift();
+    }
+  });
+
+  chart.data.labels.push('');
+
+  if(
+    chart.data.labels.length >
+    BUFFER
+  ){
+    chart.data.labels.shift();
+  }
+
+  chart.update('none');
+}
+
+// =====================================================
+// CONTROL
+// =====================================================
+
+let motoresActivos = false;
+
+let dpadState = {
+up:false,
+down:false,
+left:false,
+right:false
+};
+
+let dpadTimer = null;
+
+function updateSpeed(val){
+
+  document.getElementById(
+    'speedDisplay'
+  ).textContent = val;
+
+  enviarMovimiento();
+}
+
+async function setEnable(on){
+
+  motoresActivos = on;
+
+  await sendSerial(
+    "ENABLE," +
+    (on ? "true":"false")
+  );
+
+  const badge =
+    document.getElementById(
+      'estado-badge'
+    );
+
+  if(on){
+
+    badge.className =
+      'estado-badge estado-activo';
+
+    badge.textContent =
+      '✅ MOTOR ACTIVO';
+
+  }else{
+
+    badge.className =
+      'estado-badge estado-detenido';
+
+    badge.textContent =
+      '⛔ MOTOR DETENIDO';
+
+    parar();
+  }
+}
+
+async function enviarMovimiento(){
+
+  if(!motoresActivos)
+    return;
+
+  const spd =
+    parseInt(
+      document.getElementById(
+        'speedSlider'
+      ).value
+    ) / 22;
+
+  let vx = 0;
+  let vy = 0;
+
+  if(dpadState.up)
+    vx = spd;
+
+  if(dpadState.down)
+    vx = -spd;
+
+  if(dpadState.left)
+    vy = -spd;
+
+  if(dpadState.right)
+    vy = spd;
+
+  await sendSerial(
+    `MOVE,${vx},${vy}`
+  );
+}
+
+function parar(){
+
+  dpadState = {
+    up:false,
+    down:false,
+    left:false,
+    right:false
+  };
+
+  document.querySelectorAll(
+    '.dir-btn'
+  ).forEach(btn=>{
+
+    btn.classList.remove(
+      'pressed'
+    );
+  });
+
+  clearInterval(dpadTimer);
+
+  enviarMovimiento();
+}
+
+function dpad(dir,pressed){
+
+  dpadState[dir] = pressed;
+
+  document.getElementById(
+    'btn-' + dir
+  ).classList.toggle(
+    'pressed',
+    pressed
+  );
+
+  clearInterval(dpadTimer);
+
+  if(
+    Object.values(
+      dpadState
+    ).some(Boolean)
+  ){
+
+    enviarMovimiento();
+
+    dpadTimer =
+      setInterval(
+        enviarMovimiento,
+        100
+      );
+
+  }else{
+
+    parar();
+  }
+}
+
+const keyMap = {
+ArrowUp:'up',
+ArrowDown:'down',
+ArrowLeft:'left',
+ArrowRight:'right'
+};
+
+document.addEventListener(
+'keydown',
+e=>{
+
+if(
+  keyMap[e.key] &&
+  !dpadState[keyMap[e.key]]
+){
+
+e.preventDefault();
+
+dpad(
+  keyMap[e.key],
+  true
+);
+}
+
+if(e.key === ' '){
+
+e.preventDefault();
+
+parar();
+}
+});
+
+document.addEventListener(
+'keyup',
+e=>{
+
+if(keyMap[e.key]){
+
+e.preventDefault();
+
+dpad(
+  keyMap[e.key],
+  false
+);
+}
+});
+
+</script>
+
+</body>
+</html>

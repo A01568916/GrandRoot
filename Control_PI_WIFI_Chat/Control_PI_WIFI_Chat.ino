@@ -6,7 +6,6 @@
 
 #include <WiFi.h>
 #include <WebServer.h>
-
 #include "web_page.h"
 
 // =====================================================
@@ -45,13 +44,13 @@ WebServer server(80);
 // CINEMÁTICA
 // =====================================================
 
-const float R_RUEDA = 0.127f;
+const float R_RUEDA = 0.1397f;
 const float L_BASE  = 1.12f;
 
-const float VMAX = 3.0f;
+const float VMAX = 4.0f;
 
 // reducir para pruebas
-const float WMAX = 1.0f;
+const float WMAX = 2.0f;
 
 const float OMEGA_MAX =
     VMAX / R_RUEDA;
@@ -93,6 +92,8 @@ bool dir_actual_der = true;
 struct TeleData {
   long pul_izq;
   long pul_der;
+  int ref_i;
+  int ref_d;
   float err_i;
   float err_d;
   int dac_i;
@@ -100,6 +101,7 @@ struct TeleData {
 };
 
 static TeleData last_tele = {
+  0, 0,
   0, 0,
   0.0f, 0.0f,
   0, 0
@@ -313,9 +315,9 @@ void setup() {
     String json;
 
     if (motor == "derecho") {
-      json = "{\"pulsos\":" + String(last_tele.pul_der) + ",\"error\":" + String(last_tele.err_d, 1) + ",\"esfuerzo\":" + String(last_tele.dac_d) + "}";
+      json = "{\"ref\":" + String(last_tele.ref_d) + ",\"pulsos\":" + String(last_tele.pul_der) + ",\"error\":" + String(last_tele.err_d, 1) + ",\"esfuerzo\":" + String(last_tele.dac_d) + "}";
     } else {
-      json = "{\"pulsos\":" + String(last_tele.pul_izq) + ",\"error\":" + String(last_tele.err_i, 1) + ",\"esfuerzo\":" + String(last_tele.dac_i) + "}";
+      json = "{\"ref\":" + String(last_tele.ref_i) + ",\"pulsos\":" + String(last_tele.pul_izq) + ",\"error\":" + String(last_tele.err_i, 1) + ",\"esfuerzo\":" + String(last_tele.dac_i) + "}";
     }
 
     server.send(200, "application/json", json);
@@ -416,6 +418,7 @@ void loop() {
 
     last_tele = {
       motor_i.medida, motor_d.medida,
+      motor_i.ref, motor_d.ref,
       motor_i.error, motor_d.error,
       motor_i.dac, motor_d.dac
     };

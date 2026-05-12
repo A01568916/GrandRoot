@@ -12,6 +12,7 @@ const char HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Control PID — Motores Derecho e Izquierdo</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <style>
 :root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#f0883e;--text:#e6edf3;--muted:#8b949e}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -73,6 +74,11 @@ input[type=range]{width:100%;height:10px;accent-color:var(--accent);cursor:point
 input[type=range]{flex:1;accent-color:var(--accent)}
 #speedVal{font-size:13px;font-weight:700;min-width:30px;text-align:right}
 .tele-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.charts{display:flex;flex-direction:column;gap:14px;margin-top:20px}
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 22px}
+.chart-card .ch-header{display:flex;align-items:center;gap:9px;margin-bottom:14px}
+.chart-card .ch-title{font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--muted);text-transform:uppercase}
+.chart-card canvas{max-height:140px}
 </style>
 </head>
 <body>
@@ -185,7 +191,109 @@ input[type=range]{flex:1;accent-color:var(--accent)}
   </div>
 </main>
 
+<!-- Gráficas -->
+<div style="padding:20px 20px 40px;max-width:1200px;margin:0 auto;width:100%">
+  <div class="charts">
+    <div class="chart-card">
+      <div class="ch-header">
+        <i class="bi bi-graph-up-arrow" style="color:var(--accent);font-size:1.1rem"></i>
+        <span class="ch-title">Referencia vs Medida (Derecho)</span>
+      </div>
+      <canvas id="cRef_d"></canvas>
+    </div>
+    <div class="chart-card">
+      <div class="ch-header">
+        <i class="bi bi-graph-up-arrow" style="color:var(--accent);font-size:1.1rem"></i>
+        <span class="ch-title">Referencia vs Medida (Izquierdo)</span>
+      </div>
+      <canvas id="cRef_i"></canvas>
+    </div>
+    <div class="chart-card">
+      <div class="ch-header">
+        <i class="bi bi-activity" style="color:var(--green);font-size:1.1rem"></i>
+        <span class="ch-title">Error</span>
+      </div>
+      <canvas id="cErr"></canvas>
+    </div>
+    <div class="chart-card">
+      <div class="ch-header">
+        <i class="bi bi-lightning-fill" style="color:var(--orange);font-size:1.1rem"></i>
+        <span class="ch-title">Esfuerzo (DAC)</span>
+      </div>
+      <canvas id="cEsf"></canvas>
+    </div>
+  </div>
+</div>
+
 <script>
+// =====================================================
+// GRÁFICAS
+// =====================================================
+const BUFFER = 150;
+const emptyArr = () => Array(BUFFER).fill(null);
+
+Chart.defaults.color = '#8b949e';
+Chart.defaults.borderColor = '#21262d';
+
+function mkChart(id, datasets) {
+  return new Chart(document.getElementById(id), {
+    type: 'line',
+    data: { labels: emptyArr(), datasets },
+    options: {
+      animation: false, responsive: true, maintainAspectRatio: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', labels: { boxWidth: 10, padding: 12, usePointStyle: true, font: {size: 11} } },
+        tooltip: {
+          backgroundColor: '#1c2128', borderColor: '#30363d', borderWidth: 1,
+          titleColor: '#8b949e', bodyColor: '#e6edf3',
+        }
+      },
+      scales: {
+        x: { display: false },
+        y: { grid: { color: '#21262d' }, ticks: { color: '#8b949e', font: {size: 10} } }
+      },
+      elements: { point: { radius: 0 }, line: { borderWidth: 1.5, tension: 0.3 } }
+    }
+  });
+}
+
+const cRef_d = mkChart('cRef_d', [
+  { label: 'Referencia', data: emptyArr(), borderColor: '#a371f7', backgroundColor: 'rgba(163,113,247,.07)', fill: true, borderDash: [6,4], borderWidth: 1 },
+  { label: 'Medida', data: emptyArr(), borderColor: '#f0883e', backgroundColor: 'rgba(240,136,62,.07)', fill: true },
+]);
+const cRef_i = mkChart('cRef_i', [
+  { label: 'Referencia', data: emptyArr(), borderColor: '#a371f7', backgroundColor: 'rgba(163,113,247,.07)', fill: true, borderDash: [6,4], borderWidth: 1 },
+  { label: 'Medida', data: emptyArr(), borderColor: '#79c0ff', backgroundColor: 'rgba(121,192,255,.07)', fill: true },
+]);
+const cErr = mkChart('cErr', [
+  { label: 'Derecho', data: emptyArr(), borderColor: '#f0883e', backgroundColor: 'rgba(240,136,62,.07)', fill: true },
+  { label: 'Izquierdo', data: emptyArr(), borderColor: '#79c0ff', backgroundColor: 'rgba(121,192,255,.07)', fill: true },
+]);
+const cEsf = mkChart('cEsf', [
+  { label: 'Derecho', data: emptyArr(), borderColor: '#f0883e', backgroundColor: 'rgba(240,136,62,.07)', fill: true },
+  { label: 'Izquierdo', data: emptyArr(), borderColor: '#79c0ff', backgroundColor: 'rgba(121,192,255,.07)', fill: true },
+]);
+
+function push(chart, ...vals) {
+  vals.forEach((v, i) => {
+    if (v !== null && v !== undefined) {
+      chart.data.datasets[i].data.push(v);
+    } else {
+      chart.data.datasets[i].data.push(null);
+    }
+    if (chart.data.datasets[i].data.length > BUFFER)
+      chart.data.datasets[i].data.shift();
+  });
+  chart.data.labels.push('');
+  if (chart.data.labels.length > BUFFER) chart.data.labels.shift();
+  chart.update('none');
+}
+
+// =====================================================
+// CONTROL
+// =====================================================
+
 let motoresActivos = false;
 let dpadState = {up: false, down: false, left: false, right: false};
 let dpadTimer = null;
@@ -286,12 +394,18 @@ setInterval(() => {
     document.getElementById('tPul_d').textContent = d.pulsos;
     document.getElementById('tErr_d').textContent = d.error;
     document.getElementById('tEsf_d').textContent = d.esfuerzo;
+    push(cRef_d, d.ref, d.pulsos);
+    push(cErr, d.error, null);
+    push(cEsf, d.esfuerzo, null);
   }).catch(() => {});
   
   fetch('/api/tele?motor=izquierdo').then(r => r.json()).then(d => {
     document.getElementById('tPul_i').textContent = d.pulsos;
     document.getElementById('tErr_i').textContent = d.error;
     document.getElementById('tEsf_i').textContent = d.esfuerzo;
+    push(cRef_i, d.ref, d.pulsos);
+    push(cErr, null, d.error);
+    push(cEsf, null, d.esfuerzo);
   }).catch(() => {});
 }, 1000);
 </script>
