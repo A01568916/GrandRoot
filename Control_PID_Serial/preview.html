@@ -328,24 +328,6 @@ margin-bottom:10px
 .serial-btn:hover{
 background:#79c0ff
 }
-
-.serial-btn-disc{
-width:100%;
-padding:12px;
-border:none;
-border-radius:8px;
-background:#da3633;
-color:#fff;
-font-weight:800;
-font-size:13px;
-cursor:pointer;
-margin-bottom:10px;
-display:none
-}
-
-.serial-btn-disc:hover{
-background:#f85149
-}
 </style>
 </head>
 
@@ -384,20 +366,10 @@ Conexión Serial
 </div>
 
 <button class="serial-btn"
-id="btn-conectar"
 onclick="connectSerial()">
 
 <i class="bi bi-plug-fill"></i>
 CONECTAR SERIAL
-
-</button>
-
-<button class="serial-btn-disc"
-id="btn-desconectar"
-onclick="disconnectSerial()">
-
-<i class="bi bi-plug"></i>
-DESCONECTAR
 
 </button>
 
@@ -722,13 +694,6 @@ Esfuerzo (DAC)
 
 let port;
 let writer;
-let activeReader;
-
-function setSerialUI(conectado){
-  document.getElementById('btn-conectar').style.display    = conectado ? 'none'  : 'block';
-  document.getElementById('btn-desconectar').style.display = conectado ? 'block' : 'none';
-  document.getElementById('serialStatus').textContent      = conectado ? 'Serial Conectado' : 'Serial Desconectado';
-}
 
 async function connectSerial(){
 
@@ -744,45 +709,12 @@ async function connectSerial(){
     writer =
       port.writable.getWriter();
 
-    setSerialUI(true);
+    document.getElementById(
+      'serialStatus'
+    ).textContent =
+      'Serial Conectado';
 
     readSerial();
-
-  }catch(e){
-
-    console.error(e);
-  }
-}
-
-async function disconnectSerial(){
-
-  try{
-
-    // Parar motores antes de cerrar
-    await sendSerial("ENABLE,false");
-
-    if(activeReader){
-      await activeReader.cancel();
-      activeReader = null;
-    }
-
-    if(writer){
-      await writer.close();
-      writer = null;
-    }
-
-    if(port){
-      await port.close();
-      port = null;
-    }
-
-    setSerialUI(false);
-
-    // Resetear badge de motor
-    const badge = document.getElementById('estado-badge');
-    badge.className   = 'estado-badge estado-detenido';
-    badge.textContent = '⛔ MOTOR DETENIDO';
-    motoresActivos    = false;
 
   }catch(e){
 
@@ -806,34 +738,17 @@ async function readSerial(){
   const reader =
     port.readable.getReader();
 
-  activeReader = reader;
+  while(true){
 
-  try{
+    const {value, done} =
+      await reader.read();
 
-    while(true){
+    if(done) break;
 
-      const {value, done} =
-        await reader.read();
+    const text =
+      new TextDecoder().decode(value);
 
-      if(done) break;
-
-      const text =
-        new TextDecoder().decode(value);
-
-      parseSerial(text);
-    }
-
-  }catch(e){
-
-    // Error esperado al cancelar desde disconnectSerial
-    if(e.name !== 'AbortError'){
-      console.error(e);
-    }
-
-  }finally{
-
-    reader.releaseLock();
-    activeReader = null;
+    parseSerial(text);
   }
 }
 
@@ -841,60 +756,71 @@ async function readSerial(){
 // PARSER SERIAL
 // =====================================================
 
-// Buffer para acumular chunks parciales. El puerto serial
-// no garantiza que cada chunk sea una línea completa —
-// puede llegar "TEL,10,12,22" en un chunk y ",5.0,3.0,180,175\n"
-// en el siguiente. Sin buffer, el split da campos undefined.
-let serialLineBuffer = '';
-
 function parseSerial(data){
 
-  serialLineBuffer += data;
-
-  const lines = serialLineBuffer.split('\n');
-
-  // El último elemento puede ser una línea incompleta —
-  // lo guardamos en el buffer para el próximo chunk.
-  serialLineBuffer = lines.pop();
+  const lines =
+    data.split('\n');
 
   lines.forEach(line=>{
 
     line = line.trim();
 
-    if(!line.startsWith("TEL,")) return;
+    if(
+      !line.startsWith("TEL,")
+    ) return;
 
-    const p = line.split(",");
+    const p =
+      line.split(",");
 
-    // Necesitamos exactamente 9 campos: TEL + 8 valores.
-    // Si el chunk llegó cortado tendrá menos — lo descartamos.
-    if(p.length < 9) return;
+    const pi   = Number(p[1]);
+    const pd   = Number(p[2]);
 
-    const safeNum = v => {
-      const n = Number(v);
-      return isFinite(n) ? n : 0;
-    };
+    const ri   = Number(p[3]);
+    const rd   = Number(p[4]);
 
-    const pi   = safeNum(p[1]);
-    const pd   = safeNum(p[2]);
-    const ri   = safeNum(p[3]);
-    const rd   = safeNum(p[4]);
-    const ei   = safeNum(p[5]);
-    const ed   = safeNum(p[6]);
-    const daci = safeNum(p[7]);
-    const dacd = safeNum(p[8]);
+    const ei   = Number(p[5]);
+    const ed   = Number(p[6]);
 
-    document.getElementById('tPul_i').textContent = pi;
-    document.getElementById('tPul_d').textContent = pd;
-    document.getElementById('tRef_i').textContent = ri;
-    document.getElementById('tRef_d').textContent = rd;
-    document.getElementById('tErr_i').textContent = ei.toFixed(1);
-    document.getElementById('tErr_d').textContent = ed.toFixed(1);
-    document.getElementById('tEsf_i').textContent = daci;
-    document.getElementById('tEsf_d').textContent = dacd;
+    const daci = Number(p[7]);
+    const dacd = Number(p[8]);
+
+    document.getElementById(
+      'tPul_i'
+    ).textContent = pi;
+
+    document.getElementById(
+      'tPul_d'
+    ).textContent = pd;
+
+    document.getElementById(
+      'tRef_i'
+    ).textContent = ri;
+
+    document.getElementById(
+      'tRef_d'
+    ).textContent = rd;
+
+    document.getElementById(
+      'tErr_i'
+    ).textContent = ei.toFixed(1);
+
+    document.getElementById(
+      'tErr_d'
+    ).textContent = ed.toFixed(1);
+
+    document.getElementById(
+      'tEsf_i'
+    ).textContent = daci;
+
+    document.getElementById(
+      'tEsf_d'
+    ).textContent = dacd;
 
     push(cRef_d, rd, pd);
     push(cRef_i, ri, pi);
+
     push(cErr, ed, ei);
+
     push(cEsf, dacd, daci);
   });
 }

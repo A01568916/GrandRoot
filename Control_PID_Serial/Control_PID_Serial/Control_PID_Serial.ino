@@ -8,8 +8,6 @@
  *  2. Anti-windup correcto        → integral limitada a 255/ki
  *  3. fabsf solo al DAC final     → integral correcta en reversa
  *  4. Feedforward zona muerta     → arranque seguro con ref baja
- *  5. Sanitización NaN (A-D)      → isfinite() en integral, u_raw,
- *                                   scale y reset en cambio dirección
  */
 
 // =====================================================
@@ -179,10 +177,6 @@ void cinematica(float vx, float vy, int &ref_izq, int &ref_der) {
     OMEGA_MAX
   ) / OMEGA_MAX;
 
-  // FIX NaN-C — nunca dividir por cero ni por escala
-  // casi-cero. Si scale < umbral, usar 1.0 (sin escalar).
-  if (!isfinite(scale) || scale < 1e-6f) scale = 1.0f;
-
   omega_r /= scale;
   omega_l /= scale;
 
@@ -222,16 +216,13 @@ void aplicarMotores(int ri, int rd) {
   bool dir_der = (rd >= 0);
 
   // Al cambiar dirección: cortar DAC, resetear estado PI
-  // FIX NaN-D — también reseteamos si el integral es NaN,
-  // aunque no haya cambio de dirección, para garantizar
-  // que un estado corrupto no sobreviva entre ciclos.
-  if (dir_izq != dir_actual_izq || !isfinite(motor_i.integral)) {
+  if (dir_izq != dir_actual_izq) {
     dacWrite(SV_SIGNAL_IZQ, 0);
     motor_i.integral = 0;
     motor_i.u        = 0;
   }
 
-  if (dir_der != dir_actual_der || !isfinite(motor_d.integral)) {
+  if (dir_der != dir_actual_der) {
     dacWrite(SV_SIGNAL_DER, 0);
     motor_d.integral = 0;
     motor_d.u        = 0;
@@ -299,12 +290,6 @@ void stepPI(MotorState &m, float T) {
 
   m.error = (float)m.ref - (float)m.medida;
 
-  // FIX NaN-A — si el integral está contaminado (NaN o Inf)
-  // lo limpiamos antes de acumular. Una vez que NaN entra
-  // al integral, todas las operaciones siguientes también
-  // son NaN y el control queda envenenado indefinidamente.
-  if (!isfinite(m.integral)) m.integral = 0.0f;
-
   m.integral += m.error * T;
 
   // FIX 2 — Anti-windup: techo igual a DAC_MAX / ki
@@ -312,10 +297,6 @@ void stepPI(MotorState &m, float T) {
 
   // FIX 3 — u_raw con signo correcto; fabsf solo al DAC
   float u_raw = kp * m.error + ki * m.integral;
-
-  // FIX NaN-B — si u_raw es NaN o Inf (p.ej. kp/ki = NaN),
-  // forzamos a 0 para que el DAC nunca reciba basura.
-  if (!isfinite(u_raw)) u_raw = 0.0f;
 
   // Magnitud del esfuerzo (dirección → pin FR)
   m.u = fabsf(u_raw);
