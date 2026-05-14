@@ -61,8 +61,7 @@ DISPLAY_H    = 540
 
 # ── Modelo ────────────────────────────────────────────────────────────────────
 _HERE      = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(_HERE, '..', 'vision_computacional',
-                          'modelo_final_vision', 'modelo_final.h5')
+MODEL_PATH = os.path.join(_HERE, 'modelo_final.h5')
 IMG_SIZE   = (128, 128)
 
 # =============================================================================
