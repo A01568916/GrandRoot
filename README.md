@@ -112,9 +112,9 @@ GrandRoot/
 
 ### Hardware
 
-- Microcontroladores (Arduino / ESP32)
+- Microcontroladores ( ESP32)
 - Sensores agrícolas
-- Motores DC / servomotores
+- Motores DC 
 - Módulos de comunicación
 
 ### Software
@@ -128,7 +128,7 @@ GrandRoot/
 
 - Agricultura de precisión
 - Monitoreo de cultivos
-- Optimización de riego
+- Optimización de fertilización
 - Análisis de fertilidad del suelo
 - Investigación agronómica
 
@@ -155,9 +155,16 @@ Fases actuales:
 
 Proyecto desarrollado por estudiantes de ingeniería en:
 
-- Mecatrónica
-- Mecánica
-- Biotecnología
+- **Mecatrónica:**
+- Jose Eduardo Mancinas
+- Victor Martínez
+- Alejandro Ramos
+- Enrique Soto
+- **Mecánica:**
+- José Luis Chavarria
+- **Biotecnología:**
+- Ana Cristina Leyva
+- Melina Valenzuela
 
 ## Licencia
 
@@ -167,5 +174,5 @@ Este proyecto se encuentra bajo la licencia **MIT**.
 
 Para colaboraciones o más información:
 
-- Email: `[tu correo]`
-- GitHub: `[tu perfil]`
+- Email: A01568916@exatec.tec.mx
+- GitHub: EnriqueSotoB
