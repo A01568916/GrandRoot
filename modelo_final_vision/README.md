@@ -7,13 +7,13 @@ Utiliza **pseudo-labeling** para adaptarse al entorno específico.
 ## Especificaciones
 - **Arquitectura**: U-Net (Segmentación Semántica)
 - **Tamaño de entrada**: 128x128 píxeles
-- **Fotos utilizadas**: 127
+- **Fotos utilizadas**: 277
 - **Estrategia**: Fine-tuning con learning rate muy bajo (1e-5)
 - **Epochs**: 40
 
 ## Métricas Finales
-- **Pérdida (Val)**: 0.5392
-- **Dice (Val)**: 0.5411
+- **Pérdida (Val)**: 0.4359
+- **Dice (Val)**: 0.6272
 - **Métrica IoU**: Intersección sobre Unión
 
 ## Archivos
