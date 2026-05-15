@@ -20,12 +20,12 @@
 volatile long pulsosDer = 0;
 
 long  medidaDer   = 0;
-float kp = 0.8, ki = kp/2, kd = ki/10.;
+float kp = 0.5, ki = kp/2, kd = ki/10.;
 float referencia  = 0, ua = 0;
 float errorDer    = 0;
 int   esfuerzoDer = 0;
 float errorant = 0, errorantant = 0;
-
+float porcentaje = 0;
 unsigned long tAnterior = 0;
 
 void IRAM_ATTR contarPulsoDer() { pulsosDer++; }
@@ -66,7 +66,7 @@ void loop() {
         // Ley de control On/Off con histéresis — Derecho
         // Enciende: medida < (referencia - 20) | Apaga: medida >= referencia
         errorDer = referencia - medidaDer;
-        esfuerzoDer= kp*errorDer + kp* errorant + ki + kd*errorDer - 2*kd*errorant + kd*errorantant + ua;
+        esfuerzoDer= kp*errorDer + kp* errorant + ki*errorDer + kd*errorDer - 2*kd*errorant + kd*errorantant + ua;
         ua=esfuerzoDer;
         errorantant=errorant;
         errorant=errorDer;
@@ -75,13 +75,13 @@ void loop() {
         if (esfuerzoDer > 255) esfuerzoDer = 255;
         if (esfuerzoDer < 0) esfuerzoDer = 0;
 
-
+        porcentaje = (referencia > 0) ? (errorDer / referencia * 100.0f) : 0.0f;
 
         dacWrite(SV_SIGNAL_DER, esfuerzoDer);
 
         // Enviar datos: pul_der,err_der,esf_der
         Serial.print(medidaDer);      Serial.print(",");
-        Serial.print(errorDer,   1);  Serial.print(",");
+        Serial.print(porcentaje,   1);  Serial.print(",");
         Serial.println(esfuerzoDer);
     }
 }

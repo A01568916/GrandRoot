@@ -23,6 +23,7 @@ long  medidaDer   = 0;
 float referencia  = 0;
 float errorDer    = 0;
 int   esfuerzoDer = 0;
+float porcentaje = 0;
 
 unsigned long tAnterior = 0;
 
@@ -73,10 +74,11 @@ void loop() {
         else                         esfuerzoDer = 0;
 
         dacWrite(SV_SIGNAL_DER, esfuerzoDer);
+        porcentaje = (referencia > 0) ? (errorDer / referencia * 100.0f) : 0.0f;
 
         // Enviar datos: pul_der,err_der,esf_der
         Serial.print(medidaDer);      Serial.print(",");
-        Serial.print(errorDer,   1);  Serial.print(",");
+        Serial.print(porcentaje,   1);  Serial.print(",");
         Serial.println(esfuerzoDer);
     }
 }
