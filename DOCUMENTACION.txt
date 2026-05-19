@@ -1,0 +1,727 @@
+================================================================================
+  GRANDROOT — DOCUMENTACION TECNICA COMPLETA DEL SISTEMA
+  Version integrada: ESP32-Sensores + ESP32-Motores + Raspberry Pi 5
+================================================================================
+
+Este documento describe en detalle que hace cada archivo, cada funcion y cada
+parametro importante del sistema GrandRoot. Esta pensado para que cualquier
+miembro del equipo pueda modificar el sistema sin romper la integracion.
+
+================================================================================
+INDICE
+================================================================================
+
+  1. Arquitectura general
+  2. Flujo de datos completo
+  3. esp32_sensores.ino
+  4. esp32_motores.ino
+  5. grandroot_main.py (Raspberry Pi)
+  6. grandroot_dashboard.html
+  7. Pinout completo
+  8. Protocolo de comunicacion Serial
+  9. Como modificar la velocidad del robot
+ 10. Diagnostico de errores comunes
+ 11. Dependencias y setup inicial
+
+================================================================================
+1. ARQUITECTURA GENERAL
+================================================================================
+
+El sistema tiene tres nodos de computo conectados por USB:
+
+  [Camara USB]
+       |
+  [Raspberry Pi 5] ←──USB──→ [ESP32 Sensores]  ←──I2C──→ [MPU9250 IMU]
+       |                            |
+       |                            └──Serial2──→ [GPS NEO-6M]
+       |
+       └──USB──→ [ESP32 Motores] ←──SV_Signal──→ [Driver Derecho]
+                                                → [Driver Izquierdo]
+
+La Raspberry Pi es el cerebro central:
+- Recibe video de la camara y procesa el modelo de vision
+- Recibe datos de sensores del ESP32-Sensores
+- Envia comandos de movimiento al ESP32-Motores
+- Sirve el dashboard web para monitoreo
+
+Los ESP32 son nodos especializados:
+- ESP32-Sensores: recolecta GPS e IMU y los serializa como JSON
+- ESP32-Motores: recibe comandos JSON y los convierte en señales de motor
+
+================================================================================
+2. FLUJO DE DATOS COMPLETO
+================================================================================
+
+Flujo de VISION (cada ~100-200 ms segun velocidad de inferencia):
+  Camara → frame BGR → resize 128x128 → modelo U-Net → mascara binaria
+  → RANSAC → angulo de error → EstadoGlobal.angulo
+
+Flujo de CONTROL (cada 180 ms):
+  EstadoGlobal.angulo → cinematica → vx, vy
+  → JSON {"cmd":"MOVE","vx":0.5,"vy":0.1} → Serial USB → ESP32-Motores
+  → PI controller → dacWrite(SV_DER, valor) → Driver → Motor
+
+Flujo de SENSORES (cada 200 ms):
+  GPS NMEA → TinyGPS++ → lat/lon/x/y → JSON → Serial USB
+  MPU9250 → I2C → ax/ay/az/gx/gy/gz → mismo JSON
+  → Raspberry Pi → EstadoGlobal → Dashboard HTML via SocketIO
+
+================================================================================
+3. esp32_sensores.ino
+================================================================================
+
+PROPOSITO:
+  Leer GPS y IMU y publicar un paquete JSON por linea cada INTERVALO_MS ms
+  por el puerto USB-Serial hacia la Raspberry Pi.
+
+CONFIGURACION (variables al inicio del archivo):
+
+  GPS_RX_PIN (16):
+    Pin del ESP32 que recibe datos del GPS (RXD2).
+    El GPS envía NMEA sentences por su TXD, que va al RXD2 del ESP32.
+    Si cambias el pin, actualiza el pinMode tambien.
+
+  GPS_TX_PIN (17):
+    Pin del ESP32 que envia datos al GPS (TXD2).
+    El modulo GPS generalmente no necesita recibir comandos,
+    pero se declara para inicializar Serial2 correctamente.
+
+  GPS_BAUDRATE (9600):
+    Velocidad del modulo GPS. La mayoria de modulos NEO-6M y NEO-8M
+    usan 9600 por defecto. Si tu GPS usa diferente velocidad
+    (algunos NEO-8M pueden configurarse a 115200), cambia este valor.
+
+  IMU_ADDR (0x68):
+    Direccion I2C del MPU9250. Depende del pin AD0:
+    - AD0 a GND  → 0x68
+    - AD0 a 3.3V → 0x69
+    Verifica como esta conectado tu AD0 en el pinout.
+
+  INTERVALO_MS (200):
+    Cada cuantos milisegundos se publica un paquete JSON.
+    El GPS actualiza a ~1 Hz (1000 ms), asi que publicar a 200 ms
+    significa que el GPS a veces tiene el mismo valor en paquetes
+    consecutivos — esto es normal. El IMU si se actualiza cada ciclo.
+    Si quieres datos de IMU mas rapidos, reduce a 100 ms.
+
+  LAT_REF / LON_REF:
+    Punto de referencia para calcular coordenadas locales X/Y en metros.
+    Cambia estas coordenadas a la esquina inicial de tu parcela antes
+    de cada sesion de trabajo. Los campos x e y del JSON seran
+    la distancia en metros desde ese punto de referencia.
+
+FUNCIONES:
+
+  imu_escribir(reg, valor):
+    Escribe un byte en un registro del MPU9250 via I2C.
+    Se usa en initIMU() para configurar el sensor.
+    reg: numero del registro (constante REG_*)
+    valor: valor a escribir (1 byte)
+
+  imu_leer(reg):
+    Lee un byte de un registro del MPU9250.
+    Retorna 0xFF si no hay respuesta (posible error de conexion).
+
+  imu_leerBytes(reg, buf, n):
+    Lee n bytes consecutivos desde el registro reg.
+    Se usa para leer bloques de datos (acelerometro y giroscopio
+    son 6 bytes cada uno).
+
+  combinar(hi, lo):
+    Combina dos bytes en un entero de 16 bits con signo.
+    Los sensores MEMS envian datos en formato big-endian (byte alto primero).
+    Ejemplo: si el sensor envia 0x01, 0x23 → combinar devuelve 0x0123 = 291
+
+  gpsToX(lat, lon) / gpsToY(lat, lon):
+    Convierte coordenadas GPS (grados decimales) a coordenadas planas
+    en metros relativas al punto de referencia LAT_REF/LON_REF.
+    Formula: proyeccion equirectangular simplificada.
+    Precision: buena para distancias menores a ~10 km del punto de referencia.
+    Para distancias mayores se necesita una proyeccion mas compleja.
+
+  initIMU():
+    Inicializa el MPU9250:
+    1. Lee el registro WHO_AM_I (debe ser 0x71 o 0x73)
+    2. Despierta el sensor (sale del modo sleep)
+    3. Configura frecuencia de muestreo, filtro pasa-bajas,
+       escala de giroscopio y escala de acelerometro
+    Retorna true si el sensor responde correctamente.
+    Si retorna false, el sistema sigue funcionando pero imu_ok=false
+    en el JSON, lo que la Raspberry Pi puede detectar como error.
+
+  leerIMU():
+    Lee los 6 bytes del acelerometro y los 6 del giroscopio via I2C.
+    Convierte los raw counts a unidades fisicas (g y grados/s).
+    Se llama en cada iteracion del loop (rapido, ~1 ms).
+
+  publicarJSON():
+    Serializa toda la informacion (GPS + IMU + estado) en un JSON
+    compacto de una sola linea terminada en \n.
+    El \n es crucial: la Raspberry Pi usa readline() para leer
+    paquetes completos.
+
+  setup():
+    - Abre Serial (USB, 115200 baud) para comunicacion con RPi
+    - Abre Serial2 (GPS, 9600 baud) en los pines RXD2/TXD2
+    - Inicializa I2C y el IMU
+    - Imprime logs de arranque para diagnostico
+
+  loop():
+    - Alimenta TinyGPS++ con todos los bytes del GPS disponibles
+      (no bloqueante: solo procesa lo que ya llego)
+    - Si TinyGPS++ tiene una trama completa, actualiza gpsData
+    - Detecta si el GPS no manda datos despues de 10 segundos (error de cableado)
+    - Lee el IMU si esta disponible
+    - Si paso INTERVALO_MS desde el ultimo envio, publica el JSON
+
+================================================================================
+4. esp32_motores.ino
+================================================================================
+
+PROPOSITO:
+  Recibir comandos JSON de la Raspberry Pi por USB-Serial,
+  controlar dos motores DC con un controlador PI posicional
+  usando encoders de efecto Hall, y devolver telemetria.
+
+CONFIGURACION — PINES (al inicio del archivo):
+
+  SV_DER (26) / SV_IZQ (25):
+    Pines DAC del ESP32. Solo los GPIO 25 y 26 tienen DAC en el ESP32.
+    dacWrite() escribe un valor de 0 a 255 que se convierte en voltaje
+    analogico (0 a 3.3V). Este voltaje va al OpAmp del driver, que lo
+    amplifica para controlar la velocidad del motor.
+    IMPORTANTE: SV_DER va a SV_Driver_DER, SV_IZQ va a SV_Driver_IZQ.
+
+  FR_DER (27) / FR_IZQ (14):
+    Pines de direccion (Forward/Reverse). Digital OUTPUT.
+    Controlan el sentido de giro del motor.
+    Nota: la logica esta invertida entre IZQ y DER (heredado del hardware).
+    setDirIzq: LOW=adelante. setDirDer: HIGH=adelante.
+
+  EN_DER (33) / EN_IZQ (13):
+    Pines de enable del driver. LOW = driver habilitado.
+    Se declaran como INPUT cuando los motores estan deshabilitados
+    para dejar el pin en alta impedancia (tri-state).
+
+  ENC_DER (34) / ENC_IZQ (32):
+    Pines de encoder. Reciben pulsos de los encoders de efecto Hall.
+    IMPORTANTE: GPIO 34 es INPUT ONLY en el ESP32 — no tiene
+    resistencia pull-up interna. Si el encoder la necesita,
+    conecta una resistencia pull-up de 10k de D34 a 3.3V externamente.
+
+CONFIGURACION — CONTROL (al inicio del archivo):
+
+  SAMPLE_MS (200):
+    Periodo del controlador PI en milisegundos.
+    El controlador lee los encoders y actualiza el DAC cada SAMPLE_MS ms.
+    Si lo reduces (ej. 100 ms), el control es mas rapido pero el robot
+    puede volverse inestable si las ganancias no se reajustan.
+
+  PULSOS_MAX (22):
+    Pulsos de encoder por SAMPLE_MS que corresponden a velocidad maxima.
+    ▼▼▼ ESTE ES EL PARAMETRO PRINCIPAL PARA AJUSTAR LA VELOCIDAD ▼▼▼
+    Como calcularlo:
+    1. Pon el robot a velocidad maxima (vx=1.0) con el PI desactivado
+    2. Mide cuantos pulsos da el encoder en SAMPLE_MS ms con el Serial Monitor
+    3. Ese numero es tu PULSOS_MAX
+    Si el robot va muy rapido: reduce PULSOS_MAX
+    Si el robot va muy lento: aumenta PULSOS_MAX
+
+  kp (6.0) / ki (3.0):
+    Ganancias del controlador PI.
+    kp (proporcional): corrige el error instantaneo.
+      Si el motor va mas lento de lo pedido, aumenta el DAC en kp * error
+      Si el robot oscila mucho (sobreopasa la referencia): reduce kp
+    ki (integral): elimina el error de estado estacionario.
+      Acumula el error en el tiempo y lo corrige gradualmente.
+      Si el robot nunca llega exactamente a la velocidad pedida: sube ki
+      Si el sistema es inestable o tarda en responder: reduce ki
+
+  DAC_MIN_ARRANQUE (60):
+    Voltaje minimo para vencer la friccion estatica del motor.
+    El PI calcula una salida, pero si es muy pequena el motor no se mueve.
+    Este offset se suma a la salida del PI cuando hay referencia != 0.
+    Si el motor vibra sin moverse al arrancar: sube este valor.
+    Si el motor arranca muy bruscamente: bajalo.
+
+FUNCIONES:
+
+  isr_izq() / isr_der():
+    Rutinas de interrupcion de los encoders. Se llaman automaticamente
+    cada vez que el encoder genera un pulso (flanco RISING).
+    IRAM_ATTR: se almacenan en RAM para maxima velocidad de respuesta.
+    Solo incrementan un contador (cnt_izq, cnt_der).
+    No hagas operaciones complejas dentro de una ISR.
+
+  setDirIzq(adelante) / setDirDer(adelante):
+    Cambia la direccion del motor.
+    La logica invertida entre IZQ y DER se debe al conexionado del hardware.
+    Si un motor gira al reves de lo esperado, invierte el booleano aqui.
+
+  habilitarMotores(on):
+    Habilita o deshabilita ambos drivers.
+    Al habilitar: pone EN_IZQ y EN_DER en OUTPUT y LOW.
+    Al deshabilitar: apaga el DAC y suelta los pines de enable.
+    Resetea el estado del controlador (integral, u) para evitar
+    que el controlador "recuerde" un estado anterior al volver a arrancar.
+
+  aplicarReferencias(ri, rd):
+    Establece la referencia de pulsos por sample para cada motor.
+    Detecta cambio de direccion: si el motor cambia de adelante a atras
+    o viceversa, resetea el DAC e integral para evitar el "kick" de
+    cambio de direccion. Llama a setDirIzq/setDirDer con el signo correcto.
+
+  cinematica(vx, vy, ref_izq, ref_der):
+    Convierte velocidad lineal (vx) y angular (vy) a referencias
+    de pulsos por sample para cada rueda (cinematica diferencial).
+    vx: 0..1 = adelante, -1..0 = atras
+    vy: positivo = giro derecha, negativo = giro izquierda
+    La formula calcula la velocidad angular de cada rueda segun
+    el radio de la rueda y la distancia entre ruedas.
+
+  stepPI(motor, T):
+    Un paso del controlador PI.
+    1. Calcula error = ref - medida
+    2. Acumula integral += error * T (T = tiempo de sample en segundos)
+    3. Limita integral (anti-windup) para evitar saturacion
+    4. u = kp*error + ki*integral (magnitud absoluta)
+    5. dac = u + DAC_MIN_ARRANQUE (si hay referencia)
+    T es el tiempo de sample en segundos (SAMPLE_MS / 1000).
+
+  procesarComando(linea):
+    Parsea una linea JSON recibida por Serial y ejecuta el comando.
+    Comandos soportados:
+    - {"cmd":"ENABLE","val":true}     → habilitar motores
+    - {"cmd":"ENABLE","val":false}    → deshabilitar motores
+    - {"cmd":"MOVE","vx":0.5,"vy":0.1} → mover con cinematica
+    - {"cmd":"STOP"}                  → parada inmediata
+    - {"cmd":"EMERGENCY"}            → parada de emergencia
+    Parsing manual (sin ArduinoJson) para no agregar dependencias.
+
+  publicarTelemetria():
+    Publica un JSON con el estado interno del controlador:
+    pi/pd: pulsos medidos por encoder (izquierdo/derecho)
+    ri/rd: referencias actuales
+    ei/ed: errores actuales
+    daci/dacd: valores enviados al DAC
+    enc: true si los motores estan habilitados
+    ts: millis() del ESP32
+
+  setup():
+    Configura pines, DAC, encoders, y espera comandos de la RPi.
+
+  loop():
+    - Lee comandos JSON del Serial (no bloqueante, caracter por caracter)
+    - Cada SAMPLE_MS ms: lee encoders, corre PI, actualiza DAC, publica telemetria
+
+================================================================================
+5. grandroot_main.py (Raspberry Pi)
+================================================================================
+
+PROPOSITO:
+  Script principal que corre en la Raspberry Pi 5.
+  Coordina vision, control de motores y servidor web en hilos paralelos.
+
+CONFIGURACION (variables al inicio del archivo):
+
+  PORT_SENSORES ("/dev/ttyUSB0"):
+    Puerto USB donde esta conectado el ESP32 de sensores.
+    Para saber cual es cual:
+    1. Conecta solo el ESP32 de sensores
+    2. Ejecuta: ls /dev/ttyUSB*  → anota el puerto
+    3. Desconecta y conecta el ESP32 de motores
+    4. Ejecuta: ls /dev/ttyUSB*  → el nuevo es el de motores
+    O usa la regla udev (ver seccion 10) para nombres fijos.
+
+  PORT_MOTORES ("/dev/ttyUSB1"):
+    Puerto USB del ESP32 de motores.
+
+  MODEL_PATH:
+    Ruta al archivo modelo_final.h5.
+    Por defecto busca en la misma carpeta que grandroot_main.py.
+
+  CAMERA_INDEX (0):
+    Indice de la camara USB. Si tienes varias camaras conectadas,
+    prueba 0, 1, 2... hasta encontrar la correcta.
+    En Linux puedes listar camaras con: ls /dev/video*
+
+  ANGLE_UMBRAL (3.0):
+    Angulo en grados por debajo del cual el robot va recto.
+    Si el robot zigzaguea mucho: sube este valor (ej. 5.0)
+    Si no corrige suficiente: bajalo (ej. 2.0)
+
+  CONF_MIN (0.30):
+    Confianza minima del modelo para considerar la linea valida.
+    Si el robot se detiene en zonas claras del campo: sube este valor.
+    Si el robot se mueve aunque no haya linea clara: bajalo.
+
+  VX_BASE (0.5):
+    Velocidad de avance base (0.0 a 1.0).
+    0.5 = mitad de la velocidad maxima configurada en el ESP32.
+    Para ir mas rapido: sube (maximo 1.0).
+    Para ir mas lento: baja.
+
+  ANGULO_ESCALA (30.0):
+    Angulo maximo en grados que corresponde a giro maximo (vy=1.0).
+    Si el robot gira demasiado brusco: sube este valor.
+    Si el robot no corrige suficientemente: bajalo.
+
+CLASES:
+
+  EstadoGlobal:
+    Centraliza todo el estado del sistema.
+    Usa threading.Lock() para proteger el acceso desde multiples hilos.
+
+    Por que es necesario el Lock:
+    En Python, aunque existe el GIL, operaciones como "leer y luego
+    escribir un diccionario" no son atomicas. Sin Lock, el hilo de
+    control podria leer el angulo a mitad de que el hilo de vision
+    lo esta actualizando, obteniendo un valor inconsistente.
+
+    Metodos principales:
+    leer(): devuelve copia de todo el estado (para el dashboard)
+    escribir_vision(angulo, confianza, direccion): actualiza datos de vision
+    escribir_sensores(datos): actualiza datos de GPS e IMU
+    escribir_telemetria_motor(datos): actualiza datos de motores
+
+FUNCIONES DE VISION:
+
+  dice_coef, dice_loss, bce_dice_loss, iou_metric:
+    Funciones de perdida y metricas custom del modelo U-Net.
+    Deben coincidir exactamente con las usadas al entrenar el modelo.
+    Si cambias el modelo, estas funciones deben actualizarse tambien.
+
+  ransac_line(pts, n_iter, threshold):
+    Ajusta una recta a los puntos de la linea detectada usando RANSAC.
+    RANSAC es robusto a outliers (puntos de la mascara que no son linea).
+    n_iter: numero de iteraciones (mas = mas preciso pero mas lento)
+    threshold: distancia en pixeles para considerar un punto como inlier
+    Retorna los coeficientes (a, b) de la recta x = a*y + b
+
+  extraer_linea_navegacion(mask_binary):
+    Procesa la mascara binaria (128x128) para extraer angulo y confianza.
+    1. Aplica morfologia (cierre + apertura) para limpiar ruido
+    2. Busca el centro horizontal de la mascara en cada fila
+    3. Ajusta una recta a esos centros con RANSAC
+    4. Calcula el angulo de la recta respecto al eje vertical
+    Retorna: (angulo_deg, confianza)
+
+HILOS:
+
+  hilo_vision(model):
+    - Abre la camara USB
+    - En cada iteracion: lee frame, preprocesa, infiere, extrae angulo
+    - Escribe angulo y confianza en EstadoGlobal
+    - Si la confianza es baja, escribe direccion="RECTO" por seguridad
+    - Si la camara se desconecta: registra error y termina el hilo
+    - Log cada 30 frames con FPS, angulo y confianza actual
+
+  hilo_control(ser_motores):
+    - Habilita los motores al arrancar (envia ENABLE,true)
+    - Lee el angulo de EstadoGlobal cada 180 ms
+    - Calcula vx y vy:
+        vx = VX_BASE si hay confianza suficiente, 0 si no
+        vy = angulo / ANGULO_ESCALA (limitado a ±1)
+    - Envia {"cmd":"MOVE","vx":vx,"vy":vy} al ESP32 de motores
+    - Paralelamente lee la telemetria que devuelve el ESP32
+    - Al terminar, envia STOP
+
+  hilo_sensores(ser_sensores):
+    - Lee caracteres del ESP32 de sensores, acumula hasta \n
+    - Cuando llega una linea completa, la parsea como JSON
+    - Escribe los datos en EstadoGlobal
+    - Detecta timeout (sin datos por SENSOR_TIMEOUT_S segundos)
+      y registra una advertencia en el log
+
+  hilo_broadcast():
+    - Cada 200 ms, lee el estado completo y lo emite via SocketIO
+    - El dashboard JavaScript recibe estos datos y actualiza la UI
+
+SERVIDOR WEB:
+
+  El servidor usa Flask + Flask-SocketIO.
+  - HTTP GET / → sirve grandroot_dashboard.html
+  - WebSocket "telemetry" → emite datos cada 200 ms
+  - WebSocket "emergency_stop" → apaga el sistema
+
+  La comunicacion WebSocket es bidireccional:
+  - Raspberry Pi → Dashboard: telemetria (JSON cada 200 ms)
+  - Dashboard → Raspberry Pi: comandos (emergency_stop, etc.)
+
+FUNCION main():
+  1. Carga el modelo de vision
+  2. Abre los dos puertos Serial USB
+  3. Espera 2 segundos (los ESP32 se reinician al conectar el USB)
+  4. Lanza los 4 hilos como daemon threads
+  5. Inicia el servidor web (bloqueante hasta Ctrl+C)
+  6. Al recibir Ctrl+C: apaga los hilos, envia STOP y cierra los puertos
+
+================================================================================
+6. grandroot_dashboard.html
+================================================================================
+
+PROPOSITO:
+  Interfaz web de monitoreo. Se sirve desde la Raspberry Pi y se abre
+  en cualquier navegador en la misma red WiFi.
+
+COMO FUNCIONA:
+  El archivo HTML se carga desde la RPi por HTTP.
+  El JavaScript en la pagina conecta via SocketIO al servidor.
+  Cada 200 ms recibe un evento "telemetry" con todos los datos y
+  actualiza la interfaz sin recargar la pagina.
+
+ELEMENTOS PRINCIPALES:
+  - Mapa Leaflet: muestra la trayectoria GPS en tiempo real
+  - Tarjetas de telemetria: velocidad, angulo de vision, confianza
+  - Datos GPS: lat, lon, coordenadas locales X/Y, satelites
+  - Datos IMU: aceleracion y velocidad angular en los 3 ejes
+  - Panel de motores: pulsos medidos, referencias, valores DAC
+  - Modo AUTO/MANUAL: en AUTO el robot sigue la linea,
+    en MANUAL se puede controlar con el D-pad o teclado WASD
+  - Boton de parada de emergencia: envia "emergency_stop" al servidor
+
+PARA ACCEDER AL DASHBOARD:
+  1. La Raspberry Pi debe estar conectada a la misma red que tu dispositivo
+     (o puedes conectarte directamente via cable de red)
+  2. Abre un navegador y ve a: http://[IP-de-la-RPi]:5000
+  3. Para saber la IP de la RPi: en la RPi ejecuta "hostname -I"
+
+================================================================================
+7. PINOUT COMPLETO
+================================================================================
+
+ESP32 SENSORES:
+  GPIO 16 (RXD2) ← GPS TXD      (datos que envia el GPS)
+  GPIO 17 (TXD2) → GPS RXD      (datos que recibe el GPS, generalmente no usado)
+  VIN            → GPS VCC       (alimentacion: 5V o 3.3V segun tu modulo)
+  GND            → GPS GND
+  GPIO 22 (SCL)  → IMU SCL      (reloj I2C)
+  GPIO 21 (SDA)  → IMU SDA      (datos I2C)
+  3V3            → IMU VCC       (SIEMPRE 3.3V para el MPU9250)
+  GND            → IMU GND
+  GND            → IMU AD0       (selecciona direccion I2C = 0x68)
+  [USB]          → Raspberry Pi  (alimentacion + Serial)
+
+ESP32 MOTORES:
+  GPIO 26 (DAC1) → SV_Driver_DER  (velocidad motor derecho via OpAmp)
+  GPIO 25 (DAC2) → SV_Driver_IZQ  (velocidad motor izquierdo via OpAmp)
+  GPIO 27         → FR_Derecha    (direccion motor derecho)
+  GPIO 14         → FR_Izquierda  (direccion motor izquierdo)
+  GPIO 33         → Enable_Derecha (habilitar driver derecho)
+  GPIO 13         → Enable_Izquierda (habilitar driver izquierdo)
+  GPIO 34         → PG_DER_IN     (encoder motor derecho, INPUT ONLY)
+  GPIO 32         → PG_IZQ_IN     (encoder motor izquierdo)
+  GND             → GND drivers
+  [USB]           → Raspberry Pi  (alimentacion + Serial)
+
+CABLE PCB (tu tabla de colores):
+  Azul         → 3.3V ESP32
+  Naranja osc. → D26 (SV_Driver_DER)
+  Verde-Blanco → D25 (SV_Driver_IZQ)
+  Amarillo     → SV_DER (va al driver derecho)
+  Naranja cla. → SV_IZQ (va al driver izquierdo)
+  Verde        → PG_IZQ_IN
+  Cafe         → D32 (encoder izquierdo)
+  Gris         → PG_DER_IN
+  Amarillo-Bl. → D34 (encoder derecho)
+  Rojo         → VOL+ (10V para los drivers)
+  Gris-Blanco  → GND
+
+================================================================================
+8. PROTOCOLO DE COMUNICACION SERIAL
+================================================================================
+
+ENTRE ESP32-SENSORES Y RASPBERRY PI:
+
+  Direccion: ESP32 → Raspberry Pi (unidireccional)
+  Formato: una linea JSON por paquete, terminada en \n
+  Frecuencia: cada INTERVALO_MS ms (default 200 ms)
+  Baud rate: 115200
+
+  Ejemplo de paquete:
+  {"lat":28.7385775,"lon":-106.1217361,"x":0.0,"y":0.0,"sats":7,
+   "ax":0.01,"ay":-0.02,"az":0.98,"gx":0.1,"gy":-0.3,"gz":0.05,
+   "gps_ok":true,"imu_ok":true,"ts":45231}
+
+  Campos:
+    lat, lon: coordenadas GPS en grados decimales (10 decimales)
+    x, y: coordenadas locales en metros desde LAT_REF/LON_REF
+    sats: numero de satelites GPS visibles
+    ax,ay,az: aceleracion en g (±2g por defecto)
+    gx,gy,gz: velocidad angular en grados/s (±250°/s por defecto)
+    gps_ok: true si el GPS tiene fix de posicion valido
+    imu_ok: true si el IMU responde correctamente
+    ts: millis() del ESP32 (util para detectar paquetes perdidos)
+
+ENTRE RASPBERRY PI Y ESP32-MOTORES:
+
+  Comandos RPi → ESP32 (un JSON por linea, terminado en \n):
+    {"cmd":"ENABLE","val":true}          → habilitar motores
+    {"cmd":"ENABLE","val":false}         → deshabilitar motores
+    {"cmd":"MOVE","vx":0.5,"vy":0.1}    → mover
+    {"cmd":"STOP"}                       → parada suave
+    {"cmd":"EMERGENCY"}                 → parada de emergencia
+
+  Telemetria ESP32 → RPi (publicada cada SAMPLE_MS ms):
+    {"tel":true,"pi":5,"pd":5,"ri":10,"rd":10,
+     "ei":5.0,"ed":5.0,"daci":120,"dacd":120,"enc":true,"ts":12345}
+
+  Campos de telemetria:
+    pi,pd: pulsos medidos por encoder izquierdo/derecho en el ultimo sample
+    ri,rd: referencias de pulsos para izquierdo/derecho
+    ei,ed: error actual (ri-pi) y (rd-pd)
+    daci,dacd: valor enviado al DAC (0-255) para cada motor
+    enc: true si los motores estan habilitados
+    ts: millis() del ESP32
+
+================================================================================
+9. COMO MODIFICAR LA VELOCIDAD DEL ROBOT
+================================================================================
+
+Hay DOS niveles de ajuste de velocidad:
+
+NIVEL 1 — En grandroot_main.py (Raspberry Pi):
+  Ajusta la velocidad que PIDE la vision al controlador.
+
+  VX_BASE = 0.5
+    Reduce para ir mas lento, aumenta para ir mas rapido.
+    Rango: 0.0 (detenido) a 1.0 (velocidad maxima del controlador)
+
+  ANGULO_ESCALA = 30.0
+    Controla que tan agresivo es el giro al detectar desviacion.
+    Si el robot gira muy brusco: sube (40.0, 50.0)
+    Si no corrige suficiente: baja (20.0, 15.0)
+
+NIVEL 2 — En esp32_motores.ino (ESP32):
+  Define que corresponde a "velocidad maxima" en terminos fisicos.
+
+  PULSOS_MAX = 22
+    ▼▼▼ PARAMETRO PRINCIPAL DE VELOCIDAD FISICA ▼▼▼
+    Pulsos de encoder por SAMPLE_MS que corresponden al 100% de velocidad.
+    Si vx=1.0 y PULSOS_MAX=22, el controlador intentara alcanzar 22 pulsos
+    por cada 200 ms.
+    Para ir mas rapido: aumenta PULSOS_MAX (ej. 30, 35)
+    Para ir mas lento: reduce PULSOS_MAX (ej. 15, 10)
+
+  SAMPLE_MS = 200
+    Si lo reduces (ej. 100), el control es mas rapido pero
+    debes reajustar kp y ki para la nueva frecuencia.
+    La relacion entre kp/ki y SAMPLE_MS no es lineal,
+    conviene hacer pruebas empiricas si cambias SAMPLE_MS.
+
+  DAC_MIN_ARRANQUE = 60
+    Si el motor no arranca con velocidades bajas: subelo (70, 80)
+    Si arranca muy bruscamente: bajalo (50, 45)
+
+================================================================================
+10. DIAGNOSTICO DE ERRORES COMUNES
+================================================================================
+
+ERROR: "No se pudo abrir /dev/ttyUSB0"
+  CAUSA: El ESP32 no esta detectado o el puerto es incorrecto.
+  SOLUCION:
+    1. Ejecuta: ls /dev/ttyUSB*
+    2. Si no aparece ninguno: el ESP32 no esta conectado o el driver
+       CP210x/CH340 no esta instalado en la RPi.
+    3. Instalar driver: sudo apt install cp210x-dkms
+    4. Si aparece pero con otro numero: actualiza PORT_SENSORES/PORT_MOTORES
+    5. Si los puertos se invierten al reiniciar: usa reglas udev (ver abajo)
+
+ERROR: "WHO_AM_I = 0xFF (esperado 0x71 o 0x73)"
+  CAUSA: El IMU no responde en I2C.
+  SOLUCION:
+    1. Verifica que SDA esta en GPIO 21 y SCL en GPIO 22
+    2. Verifica alimentacion: debe ser 3.3V (el MPU9250 no tolera 5V)
+    3. Verifica que AD0 esta a GND (para direccion 0x68)
+    4. Ejecuta un scanner I2C para ver que dispositivos responden:
+       (hay un sketch de ejemplo en Arduino IDE → Examples → Wire → i2c_scanner)
+
+ERROR: "No GPS data received: check wiring" (en serial monitor del ESP32)
+  CAUSA: El GPS no manda datos al ESP32.
+  SOLUCION:
+    1. Verifica que GPS TXD va a ESP32 GPIO 16 (RXD2)
+    2. Verifica que GPS GND esta conectado a ESP32 GND
+    3. Verifica la alimentacion del GPS (algunos quieren 5V, otros 3.3V)
+    4. Dale tiempo: el GPS puede tardar 30-90 segundos en obtener fix
+       en la primera encendida (o cuando ha estado apagado mucho tiempo)
+    5. La linea "ESTOY AGARRANDO SEÑAL CARNAL" es normal durante el fix inicial
+
+ERROR: "Sin datos del ESP32 de sensores por 2.0 s"
+  CAUSA: La Raspberry Pi no recibe datos del ESP32 de sensores.
+  SOLUCION:
+    1. Verifica que el cable USB esta bien conectado
+    2. Verifica que PORT_SENSORES apunta al ESP32 correcto
+    3. Abre un monitor serial (minicom o screen) en ese puerto y verifica
+       que el ESP32 este imprimiendo JSON
+
+ERROR: Motor no arranca o vibra sin moverse
+  CAUSA: DAC_MIN_ARRANQUE es muy bajo para vencer la friccion de tu motor.
+  SOLUCION: Sube DAC_MIN_ARRANQUE de 60 a 70, 80, o hasta que el motor arranque suavemente.
+
+ERROR: Robot oscila o zigzaguea mucho
+  CAUSA: kp o ki demasiado altos, o ANGULO_ESCALA demasiado bajo.
+  SOLUCION:
+    1. Reduce kp en esp32_motores.ino (de 6.0 a 4.0 o 3.0)
+    2. Sube ANGULO_ESCALA en grandroot_main.py (de 30.0 a 45.0)
+    3. Sube ANGLE_UMBRAL en grandroot_main.py (de 3.0 a 5.0)
+
+ERROR: Los puertos se invierten al reiniciar (ESP32 de sensores en USB1 y viceversa)
+  CAUSA: Linux asigna /dev/ttyUSBx en orden de deteccion, que puede cambiar.
+  SOLUCION (reglas udev):
+    1. Conecta solo el ESP32 de sensores
+    2. Ejecuta: udevadm info /dev/ttyUSB0 | grep SERIAL
+       Copia el numero de serie (ej. "0001")
+    3. Crea el archivo: /etc/udev/rules.d/99-grandroot.rules
+       Con el contenido:
+       SUBSYSTEM=="tty", ATTRS{idSerial}=="0001", SYMLINK+="esp32_sensores"
+       SUBSYSTEM=="tty", ATTRS{idSerial}=="0002", SYMLINK+="esp32_motores"
+    4. Recarga udev: sudo udevadm control --reload-rules
+    5. Actualiza PORT_SENSORES="/dev/esp32_sensores" en grandroot_main.py
+
+================================================================================
+11. DEPENDENCIAS Y SETUP INICIAL
+================================================================================
+
+EN LA RASPBERRY PI 5:
+
+  Instalar dependencias del sistema:
+    sudo apt update
+    sudo apt install python3-pip libopencv-dev
+
+  Instalar dependencias Python:
+    pip3 install opencv-python tensorflow flask flask-socketio pyserial
+
+  Dar permisos al usuario para usar los puertos Serial:
+    sudo usermod -a -G dialout $USER
+    (requiere cerrar sesion y volver a entrar)
+
+  Ejecutar el sistema:
+    cd [carpeta con los archivos]
+    python3 grandroot_main.py
+
+  El log se guarda en grandroot.log en la misma carpeta.
+  Para ver el log en tiempo real en otra terminal:
+    tail -f grandroot.log
+
+EN LOS ESP32 (Arduino IDE):
+
+  Librerias requeridas para ESP32-Sensores:
+    - TinyGPS++  (instalar desde Library Manager)
+    (Wire.h ya viene incluida en el core de Arduino)
+
+  Librerias requeridas para ESP32-Motores:
+    - Ninguna externa (todo usa el core de Arduino para ESP32)
+
+  Configuracion del IDE:
+    - Board: "ESP32 Dev Module" (o el que corresponda a tu ESP32)
+    - Upload Speed: 921600
+    - Flash Size: 4MB
+    - Partition Scheme: Default
+
+  IMPORTANTE: Al subir codigo, desconecta el ESP32 de la Raspberry Pi
+  (o apaga grandroot_main.py primero) para que el puerto Serial
+  no este ocupado.
+
+================================================================================
+FIN DEL DOCUMENTO
+================================================================================
