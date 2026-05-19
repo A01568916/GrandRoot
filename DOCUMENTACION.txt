@@ -1,6 +1,7 @@
 ================================================================================
   GRANDROOT — DOCUMENTACION TECNICA COMPLETA DEL SISTEMA
   Version integrada: ESP32-Sensores + ESP32-Motores + Raspberry Pi 5
+  Incluye: Panel Admin con telemetria tecnica y ajuste de parametros en caliente
 ================================================================================
 
 Este documento describe en detalle que hace cada archivo, cada funcion y cada
@@ -17,11 +18,15 @@ INDICE
   4. esp32_motores.ino
   5. grandroot_main.py (Raspberry Pi)
   6. grandroot_dashboard.html
-  7. Pinout completo
-  8. Protocolo de comunicacion Serial
-  9. Como modificar la velocidad del robot
- 10. Diagnostico de errores comunes
- 11. Dependencias y setup inicial
+  7.   6a. Panel principal
+  8.   6b. Panel Admin (nuevo)
+  9. Pinout completo
+ 10. Protocolo de comunicacion Serial
+ 11. Como modificar la velocidad del robot
+ 12.   11a. Desde el codigo (compilando)
+ 13.   11b. En caliente desde el Panel Admin (sin recompilar)
+ 14. Diagnostico de errores comunes
+ 15. Dependencias y setup inicial
 
 ================================================================================
 1. ARQUITECTURA GENERAL
@@ -31,22 +36,23 @@ El sistema tiene tres nodos de computo conectados por USB:
 
   [Camara USB]
        |
-  [Raspberry Pi 5] ←──USB──→ [ESP32 Sensores]  ←──I2C──→ [MPU9250 IMU]
+  [Raspberry Pi 5] <──USB──> [ESP32 Sensores]  <──I2C──> [MPU9250 IMU]
        |                            |
-       |                            └──Serial2──→ [GPS NEO-6M]
+       |                            └──Serial2──> [GPS NEO-6M]
        |
-       └──USB──→ [ESP32 Motores] ←──SV_Signal──→ [Driver Derecho]
-                                                → [Driver Izquierdo]
+       └──USB──> [ESP32 Motores] <──SV_Signal──> [Driver Derecho]
+                                               → [Driver Izquierdo]
 
 La Raspberry Pi es el cerebro central:
 - Recibe video de la camara y procesa el modelo de vision
 - Recibe datos de sensores del ESP32-Sensores
 - Envia comandos de movimiento al ESP32-Motores
-- Sirve el dashboard web para monitoreo
+- Sirve el dashboard web para monitoreo y administracion
 
 Los ESP32 son nodos especializados:
 - ESP32-Sensores: recolecta GPS e IMU y los serializa como JSON
-- ESP32-Motores: recibe comandos JSON y los convierte en señales de motor
+- ESP32-Motores: recibe comandos JSON, controla motores, acepta
+  cambios de parametros en caliente (kp, ki, sample_ms, pulsos_max)
 
 ================================================================================
 2. FLUJO DE DATOS COMPLETO
@@ -61,10 +67,23 @@ Flujo de CONTROL (cada 180 ms):
   → JSON {"cmd":"MOVE","vx":0.5,"vy":0.1} → Serial USB → ESP32-Motores
   → PI controller → dacWrite(SV_DER, valor) → Driver → Motor
 
+  Adicionalmente, si hay un parametro pendiente del Panel Admin:
+  EstadoGlobal.param_pendiente → {"cmd":"SET_PARAM","param":"kp","value":8.0}
+  → Serial USB → ESP32-Motores → actualiza variable runtime
+
 Flujo de SENSORES (cada 200 ms):
   GPS NMEA → TinyGPS++ → lat/lon/x/y → JSON → Serial USB
   MPU9250 → I2C → ax/ay/az/gx/gy/gz → mismo JSON
   → Raspberry Pi → EstadoGlobal → Dashboard HTML via SocketIO
+
+Flujo de TELEMETRIA TECNICA (cada 200 ms):
+  ESP32-Motores → JSON tel → Serial USB → hilo_control → EstadoGlobal
+  → hilo_broadcast → SocketIO → Panel Admin del dashboard
+
+Flujo de AJUSTE DE PARAMETROS (evento del Panel Admin):
+  Dashboard (Panel Admin) → SocketIO "set_param" → grandroot_main.py
+  → EstadoGlobal.param_pendiente → hilo_control → Serial USB
+  → ESP32-Motores → variable runtime actualizada
 
 ================================================================================
 3. esp32_sensores.ino
@@ -78,7 +97,7 @@ CONFIGURACION (variables al inicio del archivo):
 
   GPS_RX_PIN (16):
     Pin del ESP32 que recibe datos del GPS (RXD2).
-    El GPS envía NMEA sentences por su TXD, que va al RXD2 del ESP32.
+    El GPS envia NMEA sentences por su TXD, que va al RXD2 del ESP32.
     Si cambias el pin, actualiza el pinMode tambien.
 
   GPS_TX_PIN (17):
@@ -181,7 +200,8 @@ FUNCIONES:
 PROPOSITO:
   Recibir comandos JSON de la Raspberry Pi por USB-Serial,
   controlar dos motores DC con un controlador PI posicional
-  usando encoders de efecto Hall, y devolver telemetria.
+  usando encoders de efecto Hall, devolver telemetria, y aceptar
+  cambios de parametros en caliente sin necesidad de recompilar.
 
 CONFIGURACION — PINES (al inicio del archivo):
 
@@ -212,20 +232,18 @@ CONFIGURACION — PINES (al inicio del archivo):
 CONFIGURACION — CONTROL (al inicio del archivo):
 
   SAMPLE_MS (200):
-    Periodo del controlador PI en milisegundos.
-    El controlador lee los encoders y actualiza el DAC cada SAMPLE_MS ms.
-    Si lo reduces (ej. 100 ms), el control es mas rapido pero el robot
-    puede volverse inestable si las ganancias no se reajustan.
+    Periodo BASE del controlador PI en milisegundos.
+    Define el valor inicial de sample_ms_runtime.
+    Puede cambiarse en caliente desde el Panel Admin sin recompilar.
 
   PULSOS_MAX (22):
     Pulsos de encoder por SAMPLE_MS que corresponden a velocidad maxima.
-    ▼▼▼ ESTE ES EL PARAMETRO PRINCIPAL PARA AJUSTAR LA VELOCIDAD ▼▼▼
+    Define el valor inicial de pulsos_max_runtime.
+    Puede cambiarse en caliente desde el Panel Admin sin recompilar.
     Como calcularlo:
     1. Pon el robot a velocidad maxima (vx=1.0) con el PI desactivado
     2. Mide cuantos pulsos da el encoder en SAMPLE_MS ms con el Serial Monitor
     3. Ese numero es tu PULSOS_MAX
-    Si el robot va muy rapido: reduce PULSOS_MAX
-    Si el robot va muy lento: aumenta PULSOS_MAX
 
   kp (6.0) / ki (3.0):
     Ganancias del controlador PI.
@@ -236,6 +254,7 @@ CONFIGURACION — CONTROL (al inicio del archivo):
       Acumula el error en el tiempo y lo corrige gradualmente.
       Si el robot nunca llega exactamente a la velocidad pedida: sube ki
       Si el sistema es inestable o tarda en responder: reduce ki
+    Ambos pueden cambiarse en caliente desde el Panel Admin.
 
   DAC_MIN_ARRANQUE (60):
     Voltaje minimo para vencer la friccion estatica del motor.
@@ -243,6 +262,20 @@ CONFIGURACION — CONTROL (al inicio del archivo):
     Este offset se suma a la salida del PI cuando hay referencia != 0.
     Si el motor vibra sin moverse al arrancar: sube este valor.
     Si el motor arranca muy bruscamente: bajalo.
+    Este valor NO es ajustable en caliente (requiere recompilar).
+
+VARIABLES RUNTIME (nuevo):
+
+  pulsos_max_runtime:
+    Copia mutable de PULSOS_MAX. El loop y la cinematica usan esta
+    variable en lugar de la constante #define, lo que permite que
+    SET_PARAM la actualice sin reiniciar el ESP32.
+    Valor inicial = PULSOS_MAX.
+
+  sample_ms_runtime:
+    Copia mutable de SAMPLE_MS. El loop usa esta variable para
+    decidir cada cuando ejecutar el ciclo de control.
+    Valor inicial = SAMPLE_MS.
 
 FUNCIONES:
 
@@ -276,8 +309,8 @@ FUNCIONES:
     de pulsos por sample para cada rueda (cinematica diferencial).
     vx: 0..1 = adelante, -1..0 = atras
     vy: positivo = giro derecha, negativo = giro izquierda
-    La formula calcula la velocidad angular de cada rueda segun
-    el radio de la rueda y la distancia entre ruedas.
+    Usa pulsos_max_runtime (no PULSOS_MAX) para que los cambios
+    del Panel Admin tengan efecto inmediato.
 
   stepPI(motor, T):
     Un paso del controlador PI.
@@ -286,33 +319,51 @@ FUNCIONES:
     3. Limita integral (anti-windup) para evitar saturacion
     4. u = kp*error + ki*integral (magnitud absoluta)
     5. dac = u + DAC_MIN_ARRANQUE (si hay referencia)
-    T es el tiempo de sample en segundos (SAMPLE_MS / 1000).
+    T se calcula como sample_ms_runtime / 1000.0 para mantenerse
+    consistente con el periodo real del ciclo.
 
   procesarComando(linea):
     Parsea una linea JSON recibida por Serial y ejecuta el comando.
     Comandos soportados:
-    - {"cmd":"ENABLE","val":true}     → habilitar motores
-    - {"cmd":"ENABLE","val":false}    → deshabilitar motores
-    - {"cmd":"MOVE","vx":0.5,"vy":0.1} → mover con cinematica
-    - {"cmd":"STOP"}                  → parada inmediata
-    - {"cmd":"EMERGENCY"}            → parada de emergencia
+    - {"cmd":"ENABLE","val":true}              → habilitar motores
+    - {"cmd":"ENABLE","val":false}             → deshabilitar motores
+    - {"cmd":"MOVE","vx":0.5,"vy":0.1}         → mover con cinematica
+    - {"cmd":"STOP"}                            → parada inmediata
+    - {"cmd":"EMERGENCY"}                      → parada de emergencia
+    - {"cmd":"SET_PARAM","param":"kp","value":8.0}  → cambio en caliente
     Parsing manual (sin ArduinoJson) para no agregar dependencias.
 
+  SET_PARAM (manejado dentro de procesarComando):
+    Permite cambiar kp, ki, pulsos_max y sample_ms sin recompilar.
+    Parametros aceptados:
+      "kp"         → actualiza la variable global kp
+      "ki"         → actualiza la variable global ki
+      "pulsos_max" → actualiza pulsos_max_runtime
+      "sample_ms"  → actualiza sample_ms_runtime
+    El ESP32 imprime un log en Serial confirmando el cambio.
+    Ejemplo: [PARAM] kp = 8.00
+    Si el parametro no se reconoce: imprime [PARAM][WARN] y lo ignora.
+
   publicarTelemetria():
-    Publica un JSON con el estado interno del controlador:
-    pi/pd: pulsos medidos por encoder (izquierdo/derecho)
-    ri/rd: referencias actuales
-    ei/ed: errores actuales
-    daci/dacd: valores enviados al DAC
-    enc: true si los motores estan habilitados
-    ts: millis() del ESP32
+    Publica un JSON con el estado interno del controlador cada
+    sample_ms_runtime ms. Este JSON es consumido por hilo_control
+    en la Raspberry Pi y reenviado al Panel Admin via SocketIO.
+    Campos:
+      pi/pd:   pulsos medidos por encoder (izquierdo/derecho)
+      ri/rd:   referencias actuales en pulsos/sample
+      ei/ed:   errores actuales (ri-pi) y (rd-pd)
+      daci/dacd: valores enviados al DAC (0-255) para cada motor
+      enc:     true si los motores estan habilitados
+      ts:      millis() del ESP32
 
   setup():
-    Configura pines, DAC, encoders, y espera comandos de la RPi.
+    Configura pines, DAC, encoders, inicializa variables runtime
+    con los valores de las constantes #define, y espera comandos.
 
   loop():
     - Lee comandos JSON del Serial (no bloqueante, caracter por caracter)
-    - Cada SAMPLE_MS ms: lee encoders, corre PI, actualiza DAC, publica telemetria
+    - Cada sample_ms_runtime ms: lee encoders, corre PI,
+      actualiza DAC, publica telemetria
 
 ================================================================================
 5. grandroot_main.py (Raspberry Pi)
@@ -320,7 +371,8 @@ FUNCIONES:
 
 PROPOSITO:
   Script principal que corre en la Raspberry Pi 5.
-  Coordina vision, control de motores y servidor web en hilos paralelos.
+  Coordina vision, control de motores, servidor web y panel admin
+  en hilos paralelos.
 
 CONFIGURACION (variables al inicio del archivo):
 
@@ -331,7 +383,7 @@ CONFIGURACION (variables al inicio del archivo):
     2. Ejecuta: ls /dev/ttyUSB*  → anota el puerto
     3. Desconecta y conecta el ESP32 de motores
     4. Ejecuta: ls /dev/ttyUSB*  → el nuevo es el de motores
-    O usa la regla udev (ver seccion 10) para nombres fijos.
+    O usa la regla udev (ver seccion 14) para nombres fijos.
 
   PORT_MOTORES ("/dev/ttyUSB1"):
     Puerto USB del ESP32 de motores.
@@ -378,11 +430,17 @@ CLASES:
     control podria leer el angulo a mitad de que el hilo de vision
     lo esta actualizando, obteniendo un valor inconsistente.
 
+    Atributos nuevos respecto a la version anterior:
+      param_pendiente: dict {"param":..., "value":...} o None.
+        Se asigna cuando el Panel Admin envia un SET_PARAM.
+        El hilo_control lo lee en su proximo ciclo, lo envia al ESP32
+        y lo vuelve a poner en None.
+
     Metodos principales:
-    leer(): devuelve copia de todo el estado (para el dashboard)
-    escribir_vision(angulo, confianza, direccion): actualiza datos de vision
-    escribir_sensores(datos): actualiza datos de GPS e IMU
-    escribir_telemetria_motor(datos): actualiza datos de motores
+      leer(): devuelve copia de todo el estado (para el dashboard)
+      escribir_vision(angulo, confianza, direccion): actualiza datos de vision
+      escribir_sensores(datos): actualiza datos de GPS e IMU
+      escribir_telemetria_motor(datos): actualiza datos de motores
 
 FUNCIONES DE VISION:
 
@@ -418,12 +476,12 @@ HILOS:
 
   hilo_control(ser_motores):
     - Habilita los motores al arrancar (envia ENABLE,true)
-    - Lee el angulo de EstadoGlobal cada 180 ms
-    - Calcula vx y vy:
-        vx = VX_BASE si hay confianza suficiente, 0 si no
-        vy = angulo / ANGULO_ESCALA (limitado a ±1)
-    - Envia {"cmd":"MOVE","vx":vx,"vy":vy} al ESP32 de motores
-    - Paralelamente lee la telemetria que devuelve el ESP32
+    - En cada ciclo (180 ms):
+        1. Lee telemetria del ESP32 si hay bytes disponibles en el buffer
+        2. Revisa EstadoGlobal.param_pendiente — si hay algo, envia
+           {"cmd":"SET_PARAM",...} al ESP32 y limpia el campo
+        3. Calcula vx y vy desde el angulo y confianza actuales
+        4. Envia {"cmd":"MOVE","vx":vx,"vy":vy} al ESP32
     - Al terminar, envia STOP
 
   hilo_sensores(ser_sensores):
@@ -435,18 +493,28 @@ HILOS:
 
   hilo_broadcast():
     - Cada 200 ms, lee el estado completo y lo emite via SocketIO
-    - El dashboard JavaScript recibe estos datos y actualiza la UI
+      como evento "telemetry"
+    - El panel principal y el Panel Admin reciben estos datos
 
-SERVIDOR WEB:
+SERVIDOR WEB (Flask + SocketIO):
 
-  El servidor usa Flask + Flask-SocketIO.
-  - HTTP GET / → sirve grandroot_dashboard.html
-  - WebSocket "telemetry" → emite datos cada 200 ms
-  - WebSocket "emergency_stop" → apaga el sistema
+  Rutas y eventos:
+    HTTP GET /         → sirve grandroot_dashboard.html
+    WS "telemetry"     → emite datos cada 200 ms (RPi → dashboard)
+    WS "emergency_stop"→ apaga el sistema
+    WS "set_mode"      → cambia modo AUTO/MANUAL (recibido del dashboard)
+    WS "motor_cmd"     → start/stop motores (recibido del dashboard)
+    WS "manual_cmd"    → comandos de joystick manual (recibido del dashboard)
+    WS "set_param"     → NUEVO: recibe parametro del Panel Admin y lo
+                         guarda en EstadoGlobal.param_pendiente para que
+                         hilo_control lo envie al ESP32 en el proximo ciclo
 
-  La comunicacion WebSocket es bidireccional:
-  - Raspberry Pi → Dashboard: telemetria (JSON cada 200 ms)
-  - Dashboard → Raspberry Pi: comandos (emergency_stop, etc.)
+  on_set_param(data):
+    Handler del evento "set_param".
+    Valida que el parametro sea uno de: kp, ki, sample_ms, pulsos_max.
+    Valida que el valor sea numerico y mayor que cero.
+    Guarda {"param": nombre, "value": valor} en EstadoGlobal.param_pendiente.
+    El hilo_control lo detecta y lo reenvía al ESP32 en su proximo ciclo.
 
 FUNCION main():
   1. Carga el modelo de vision
@@ -457,25 +525,27 @@ FUNCION main():
   6. Al recibir Ctrl+C: apaga los hilos, envia STOP y cierra los puertos
 
 ================================================================================
-6. grandroot_dashboard.html
+6a. grandroot_dashboard.html — Panel principal
 ================================================================================
 
 PROPOSITO:
-  Interfaz web de monitoreo. Se sirve desde la Raspberry Pi y se abre
-  en cualquier navegador en la misma red WiFi.
+  Interfaz web de monitoreo y control. Se sirve desde la Raspberry Pi
+  y se abre en cualquier navegador en la misma red WiFi.
 
 COMO FUNCIONA:
   El archivo HTML se carga desde la RPi por HTTP.
   El JavaScript en la pagina conecta via SocketIO al servidor.
   Cada 200 ms recibe un evento "telemetry" con todos los datos y
   actualiza la interfaz sin recargar la pagina.
+  Si no hay conexion al backend, activa una simulacion automatica
+  para poder revisar el dashboard sin el hardware conectado.
 
 ELEMENTOS PRINCIPALES:
-  - Mapa Leaflet: muestra la trayectoria GPS en tiempo real
+  - Header: logo, hora, boton Admin, indicador de conexion
+  - Mapa Leaflet: muestra la trayectoria GPS en tiempo real,
+    con tiles de OpenStreetmap o grilla offline si no hay internet
   - Tarjetas de telemetria: velocidad, angulo de vision, confianza
-  - Datos GPS: lat, lon, coordenadas locales X/Y, satelites
-  - Datos IMU: aceleracion y velocidad angular en los 3 ejes
-  - Panel de motores: pulsos medidos, referencias, valores DAC
+  - Datos GPS: lat, lon, coordenadas locales X/Y, satelites, fix
   - Modo AUTO/MANUAL: en AUTO el robot sigue la linea,
     en MANUAL se puede controlar con el D-pad o teclado WASD
   - Boton de parada de emergencia: envia "emergency_stop" al servidor
@@ -487,45 +557,166 @@ PARA ACCEDER AL DASHBOARD:
   3. Para saber la IP de la RPi: en la RPi ejecuta "hostname -I"
 
 ================================================================================
+6b. grandroot_dashboard.html — Panel Admin (nuevo)
+================================================================================
+
+PROPOSITO:
+  Terminal tecnica de solo-lectura (telemetria) y ajuste de parametros
+  del controlador PI en caliente, protegida por contrasena.
+  Esta completamente separada del panel principal para no confundir
+  al operador de campo con datos tecnicos.
+
+COMO SE ACCEDE:
+  1. Clic en el boton "⚙ Admin" en el header (junto a la hora)
+  2. Se abre un dialogo pidiendo contrasena
+  3. Contrasena por defecto: grandroot2025
+     Para cambiarla: edita la constante ADMIN_PASSWORD en el JS del dashboard
+  4. Si la contrasena es correcta, se abre el panel flotante en la
+     esquina superior derecha de la pantalla
+  5. Para cerrarlo: clic en la X del panel o en cualquier lugar fuera
+
+ELEMENTOS DEL PANEL ADMIN:
+
+  Telemetria Motor Izquierdo (actualizada en tiempo real cada 200 ms):
+    Pulsos:  pulsos de encoder medidos en el ultimo sample (pi)
+             Cuantas veces giro el encoder en ese intervalo.
+             Si el motor va en la direccion correcta, deberia estar
+             cerca del valor de Ref.
+    Ref:     referencia de pulsos pedida al controlador (ri)
+             Cuantos pulsos deberia dar en ese sample segun la cinematica.
+    Error:   diferencia Ref - Pulsos (ei)
+             Verde si |error| < 3, amarillo si < 8, rojo si > 8.
+             Un error persistentemente alto indica que el motor no
+             puede alcanzar la velocidad pedida (sube kp o ki).
+    DAC:     valor enviado al DAC en ese ciclo (0-255) (daci)
+             Verde si 80-220, amarillo si < 80, rojo si > 220.
+             Si el DAC esta siempre en 255: el motor esta saturado,
+             reduce PULSOS_MAX o VX_BASE.
+
+  Telemetria Motor Derecho: mismos campos para el motor derecho (pd, rd, ed, dacd).
+
+  Parametros del controlador PI (editables en caliente):
+    Cada parametro muestra su valor actual (leido de la telemetria)
+    y un campo de texto para ingresar el nuevo valor.
+    Al presionar "Aplicar":
+      1. El dashboard envia el evento SocketIO "set_param" al backend
+      2. grandroot_main.py lo guarda en EstadoGlobal.param_pendiente
+      3. hilo_control lo envia al ESP32 como {"cmd":"SET_PARAM",...}
+      4. El ESP32 actualiza su variable runtime y confirma por Serial
+      5. La telemetria siguiente ya refleja el nuevo valor
+
+    Kp: ganancia proporcional del PI. Rango tipico: 3.0 - 12.0
+    Ki: ganancia integral del PI. Rango tipico: 1.0 - 6.0
+    Sample Time (ms): periodo del ciclo de control. Rango tipico: 100-500
+      Nota: cambiar esto tambien cambia la frecuencia de telemetria.
+      Valores muy bajos (< 100 ms) pueden desestabilizar el control.
+    Pulsos Max: pulsos de encoder por sample a velocidad maxima.
+      Este es el parametro mas directo para ajustar la velocidad.
+      Sube para ir mas rapido, baja para ir mas lento.
+
+  Terminal de log:
+    Muestra en tiempo real:
+      - Conexiones y desconexiones al dashboard
+      - Parametros enviados al ESP32 (tipo y valor)
+      - Errores de comunicacion o valores invalidos
+    Boton "Limpiar": vacia la terminal.
+    Se limita a 120 lineas para no consumir memoria del navegador.
+    Codigos de color:
+      Gris  = mensaje general
+      Verde = OK / confirmacion
+      Amarillo = advertencia / parametro enviado
+      Rojo  = error
+      Azul  = informacion de sistema
+
+FUNCIONES JAVASCRIPT DEL PANEL ADMIN:
+
+  abrirLogin():
+    Muestra el modal de contrasena y enfoca el campo de texto.
+    Se llama al presionar el boton "⚙ Admin".
+
+  cerrarLogin():
+    Cierra el modal de contrasena sin hacer nada.
+
+  verificarAdmin():
+    Compara la contrasena ingresada con ADMIN_PASSWORD.
+    Si coincide: cierra el modal y abre el panel tecnico.
+    Si no coincide: muestra "Contrasena incorrecta" y limpia el campo.
+    También se activa con Enter desde el campo de contrasena.
+
+  abrirAdmin() / cerrarAdmin():
+    Muestran u ocultan el panel flotante.
+    abrirAdmin() tambien registra el evento en la terminal de log.
+
+  updateTechPanel(data):
+    Se llama cada vez que llega un evento "telemetry" del backend.
+    Solo actualiza la UI si el panel esta abierto (adminAbierto = true)
+    para no hacer trabajo innecesario cuando esta cerrado.
+    Lee los campos motor_pi, motor_pd, motor_ri, motor_rd,
+    motor_daci, motor_dacd del objeto de telemetria y los muestra.
+    Tambien actualiza los "Actual: ..." de los parametros si el
+    backend los incluye en la telemetria (kp, ki, sample_ms, pulsos_max).
+
+  setTelVal(id, val, tipo):
+    Actualiza el texto de un elemento de telemetria y aplica el
+    color correcto segun el tipo (dac, error) y el valor.
+
+  enviarParam(nombre):
+    Lee el valor del campo de entrada correspondiente al parametro.
+    Valida que sea un numero positivo.
+    Envia el evento SocketIO "set_param" al backend.
+    Registra el envio en la terminal de log.
+    Actualiza optimistamente el display "Actual: ..." sin esperar
+    confirmacion (la telemetria siguiente lo confirmara de todas formas).
+
+  adminLog(tipo, mensaje):
+    Agrega una linea a la terminal de log con timestamp.
+    tipo: "ok", "warn", "err", "info"
+    Limita el terminal a MAX_LOG_LINES (120) lineas.
+    Hace auto-scroll al fondo despues de agregar cada linea.
+
+  limpiarLog():
+    Vacia el contenido de la terminal de log.
+
+================================================================================
 7. PINOUT COMPLETO
 ================================================================================
 
 ESP32 SENSORES:
-  GPIO 16 (RXD2) ← GPS TXD      (datos que envia el GPS)
-  GPIO 17 (TXD2) → GPS RXD      (datos que recibe el GPS, generalmente no usado)
-  VIN            → GPS VCC       (alimentacion: 5V o 3.3V segun tu modulo)
-  GND            → GPS GND
-  GPIO 22 (SCL)  → IMU SCL      (reloj I2C)
-  GPIO 21 (SDA)  → IMU SDA      (datos I2C)
-  3V3            → IMU VCC       (SIEMPRE 3.3V para el MPU9250)
-  GND            → IMU GND
-  GND            → IMU AD0       (selecciona direccion I2C = 0x68)
-  [USB]          → Raspberry Pi  (alimentacion + Serial)
+  GPIO 16 (RXD2) <- GPS TXD      (datos que envia el GPS)
+  GPIO 17 (TXD2) -> GPS RXD      (datos que recibe el GPS, generalmente no usado)
+  VIN            -> GPS VCC       (alimentacion: 5V o 3.3V segun tu modulo)
+  GND            -> GPS GND
+  GPIO 22 (SCL)  -> IMU SCL      (reloj I2C)
+  GPIO 21 (SDA)  -> IMU SDA      (datos I2C)
+  3V3            -> IMU VCC       (SIEMPRE 3.3V para el MPU9250)
+  GND            -> IMU GND
+  GND            -> IMU AD0       (selecciona direccion I2C = 0x68)
+  [USB]          -> Raspberry Pi  (alimentacion + Serial)
 
 ESP32 MOTORES:
-  GPIO 26 (DAC1) → SV_Driver_DER  (velocidad motor derecho via OpAmp)
-  GPIO 25 (DAC2) → SV_Driver_IZQ  (velocidad motor izquierdo via OpAmp)
-  GPIO 27         → FR_Derecha    (direccion motor derecho)
-  GPIO 14         → FR_Izquierda  (direccion motor izquierdo)
-  GPIO 33         → Enable_Derecha (habilitar driver derecho)
-  GPIO 13         → Enable_Izquierda (habilitar driver izquierdo)
-  GPIO 34         → PG_DER_IN     (encoder motor derecho, INPUT ONLY)
-  GPIO 32         → PG_IZQ_IN     (encoder motor izquierdo)
-  GND             → GND drivers
-  [USB]           → Raspberry Pi  (alimentacion + Serial)
+  GPIO 26 (DAC1) -> SV_Driver_DER  (velocidad motor derecho via OpAmp)
+  GPIO 25 (DAC2) -> SV_Driver_IZQ  (velocidad motor izquierdo via OpAmp)
+  GPIO 27         -> FR_Derecha    (direccion motor derecho)
+  GPIO 14         -> FR_Izquierda  (direccion motor izquierdo)
+  GPIO 33         -> Enable_Derecha (habilitar driver derecho)
+  GPIO 13         -> Enable_Izquierda (habilitar driver izquierdo)
+  GPIO 34         -> PG_DER_IN     (encoder motor derecho, INPUT ONLY)
+  GPIO 32         -> PG_IZQ_IN     (encoder motor izquierdo)
+  GND             -> GND drivers
+  [USB]           -> Raspberry Pi  (alimentacion + Serial)
 
-CABLE PCB (tu tabla de colores):
-  Azul         → 3.3V ESP32
-  Naranja osc. → D26 (SV_Driver_DER)
-  Verde-Blanco → D25 (SV_Driver_IZQ)
-  Amarillo     → SV_DER (va al driver derecho)
-  Naranja cla. → SV_IZQ (va al driver izquierdo)
-  Verde        → PG_IZQ_IN
-  Cafe         → D32 (encoder izquierdo)
-  Gris         → PG_DER_IN
-  Amarillo-Bl. → D34 (encoder derecho)
-  Rojo         → VOL+ (10V para los drivers)
-  Gris-Blanco  → GND
+CABLE PCB (tabla de colores):
+  Azul         -> 3.3V ESP32
+  Naranja osc. -> D26 (SV_Driver_DER)
+  Verde-Blanco -> D25 (SV_Driver_IZQ)
+  Amarillo     -> SV_DER (va al driver derecho)
+  Naranja cla. -> SV_IZQ (va al driver izquierdo)
+  Verde        -> PG_IZQ_IN
+  Cafe         -> D32 (encoder izquierdo)
+  Gris         -> PG_DER_IN
+  Amarillo-Bl. -> D34 (encoder derecho)
+  Rojo         -> VOL+ (10V para los drivers)
+  Gris-Blanco  -> GND
 
 ================================================================================
 8. PROTOCOLO DE COMUNICACION SERIAL
@@ -544,44 +735,49 @@ ENTRE ESP32-SENSORES Y RASPBERRY PI:
    "gps_ok":true,"imu_ok":true,"ts":45231}
 
   Campos:
-    lat, lon: coordenadas GPS en grados decimales (10 decimales)
-    x, y: coordenadas locales en metros desde LAT_REF/LON_REF
-    sats: numero de satelites GPS visibles
-    ax,ay,az: aceleracion en g (±2g por defecto)
-    gx,gy,gz: velocidad angular en grados/s (±250°/s por defecto)
-    gps_ok: true si el GPS tiene fix de posicion valido
-    imu_ok: true si el IMU responde correctamente
-    ts: millis() del ESP32 (util para detectar paquetes perdidos)
+    lat, lon:  coordenadas GPS en grados decimales (10 decimales)
+    x, y:      coordenadas locales en metros desde LAT_REF/LON_REF
+    sats:      numero de satelites GPS visibles
+    ax,ay,az:  aceleracion en g (±2g por defecto)
+    gx,gy,gz:  velocidad angular en grados/s (±250°/s por defecto)
+    gps_ok:    true si el GPS tiene fix de posicion valido
+    imu_ok:    true si el IMU responde correctamente
+    ts:        millis() del ESP32 (util para detectar paquetes perdidos)
 
 ENTRE RASPBERRY PI Y ESP32-MOTORES:
 
   Comandos RPi → ESP32 (un JSON por linea, terminado en \n):
-    {"cmd":"ENABLE","val":true}          → habilitar motores
-    {"cmd":"ENABLE","val":false}         → deshabilitar motores
-    {"cmd":"MOVE","vx":0.5,"vy":0.1}    → mover
-    {"cmd":"STOP"}                       → parada suave
-    {"cmd":"EMERGENCY"}                 → parada de emergencia
+    {"cmd":"ENABLE","val":true}                       → habilitar motores
+    {"cmd":"ENABLE","val":false}                      → deshabilitar motores
+    {"cmd":"MOVE","vx":0.5,"vy":0.1}                  → mover
+    {"cmd":"STOP"}                                     → parada suave
+    {"cmd":"EMERGENCY"}                               → parada de emergencia
+    {"cmd":"SET_PARAM","param":"kp","value":8.0}       → cambiar kp en caliente
+    {"cmd":"SET_PARAM","param":"ki","value":4.0}       → cambiar ki en caliente
+    {"cmd":"SET_PARAM","param":"pulsos_max","value":30} → cambiar velocidad max
+    {"cmd":"SET_PARAM","param":"sample_ms","value":150} → cambiar periodo PI
 
-  Telemetria ESP32 → RPi (publicada cada SAMPLE_MS ms):
+  Telemetria ESP32 → RPi (publicada cada sample_ms_runtime ms):
     {"tel":true,"pi":5,"pd":5,"ri":10,"rd":10,
      "ei":5.0,"ed":5.0,"daci":120,"dacd":120,"enc":true,"ts":12345}
 
   Campos de telemetria:
-    pi,pd: pulsos medidos por encoder izquierdo/derecho en el ultimo sample
-    ri,rd: referencias de pulsos para izquierdo/derecho
-    ei,ed: error actual (ri-pi) y (rd-pd)
+    pi,pd:     pulsos medidos por encoder izquierdo/derecho en el ultimo sample
+    ri,rd:     referencias de pulsos para izquierdo/derecho
+    ei,ed:     error actual (ri-pi) y (rd-pd)
     daci,dacd: valor enviado al DAC (0-255) para cada motor
-    enc: true si los motores estan habilitados
-    ts: millis() del ESP32
+    enc:       true si los motores estan habilitados
+    ts:        millis() del ESP32
 
 ================================================================================
 9. COMO MODIFICAR LA VELOCIDAD DEL ROBOT
 ================================================================================
 
-Hay DOS niveles de ajuste de velocidad:
+Hay TRES formas de ajustar la velocidad, de mas a menos permanente:
+
+--- OPCION A: Cambiando constantes en el codigo (requiere recompilar) ---
 
 NIVEL 1 — En grandroot_main.py (Raspberry Pi):
-  Ajusta la velocidad que PIDE la vision al controlador.
 
   VX_BASE = 0.5
     Reduce para ir mas lento, aumenta para ir mas rapido.
@@ -593,25 +789,42 @@ NIVEL 1 — En grandroot_main.py (Raspberry Pi):
     Si no corrige suficiente: baja (20.0, 15.0)
 
 NIVEL 2 — En esp32_motores.ino (ESP32):
-  Define que corresponde a "velocidad maxima" en terminos fisicos.
 
   PULSOS_MAX = 22
-    ▼▼▼ PARAMETRO PRINCIPAL DE VELOCIDAD FISICA ▼▼▼
     Pulsos de encoder por SAMPLE_MS que corresponden al 100% de velocidad.
-    Si vx=1.0 y PULSOS_MAX=22, el controlador intentara alcanzar 22 pulsos
-    por cada 200 ms.
-    Para ir mas rapido: aumenta PULSOS_MAX (ej. 30, 35)
-    Para ir mas lento: reduce PULSOS_MAX (ej. 15, 10)
+    Para ir mas rapido: aumenta (ej. 30, 35)
+    Para ir mas lento: reduce (ej. 15, 10)
 
   SAMPLE_MS = 200
     Si lo reduces (ej. 100), el control es mas rapido pero
-    debes reajustar kp y ki para la nueva frecuencia.
-    La relacion entre kp/ki y SAMPLE_MS no es lineal,
-    conviene hacer pruebas empiricas si cambias SAMPLE_MS.
+    debes reajustar kp y ki.
 
   DAC_MIN_ARRANQUE = 60
     Si el motor no arranca con velocidades bajas: subelo (70, 80)
     Si arranca muy bruscamente: bajalo (50, 45)
+    (Este parametro NO es ajustable en caliente)
+
+--- OPCION B: Desde el Panel Admin en caliente (sin recompilar) ---
+
+  Los siguientes parametros pueden cambiarse mientras el robot esta
+  en funcionamiento, sin detenerlo ni recompilar nada:
+
+    Pulsos Max  → equivale a PULSOS_MAX del codigo
+    Sample Time → equivale a SAMPLE_MS del codigo
+    Kp          → ganancia proporcional del PI
+    Ki          → ganancia integral del PI
+
+  Procedimiento:
+  1. Abre el dashboard en el navegador
+  2. Clic en "⚙ Admin" → ingresa la contrasena
+  3. En la seccion "Parametros del controlador PI", ingresa el nuevo valor
+  4. Clic en "Aplicar"
+  5. La terminal de log confirma el envio
+  6. La telemetria refleja el cambio en el siguiente ciclo
+
+  IMPORTANTE: los cambios en caliente se pierden si el ESP32 se reinicia.
+  Para hacerlos permanentes, edita las constantes en esp32_motores.ino
+  y vuelve a subir el firmware.
 
 ================================================================================
 10. DIAGNOSTICO DE ERRORES COMUNES
@@ -656,16 +869,43 @@ ERROR: "Sin datos del ESP32 de sensores por 2.0 s"
 
 ERROR: Motor no arranca o vibra sin moverse
   CAUSA: DAC_MIN_ARRANQUE es muy bajo para vencer la friccion de tu motor.
-  SOLUCION: Sube DAC_MIN_ARRANQUE de 60 a 70, 80, o hasta que el motor arranque suavemente.
+  SOLUCION: Sube DAC_MIN_ARRANQUE de 60 a 70, 80, o hasta que el motor
+  arranque suavemente. Este parametro requiere recompilar el ESP32.
 
 ERROR: Robot oscila o zigzaguea mucho
   CAUSA: kp o ki demasiado altos, o ANGULO_ESCALA demasiado bajo.
-  SOLUCION:
-    1. Reduce kp en esp32_motores.ino (de 6.0 a 4.0 o 3.0)
-    2. Sube ANGULO_ESCALA en grandroot_main.py (de 30.0 a 45.0)
-    3. Sube ANGLE_UMBRAL en grandroot_main.py (de 3.0 a 5.0)
+  SOLUCION (sin recompilar, usando Panel Admin):
+    1. Abre el Panel Admin y reduce Kp (de 6.0 a 4.0 o 3.0)
+    2. En grandroot_main.py sube ANGULO_ESCALA (de 30.0 a 45.0)
+    3. En grandroot_main.py sube ANGLE_UMBRAL (de 3.0 a 5.0)
 
-ERROR: Los puertos se invierten al reiniciar (ESP32 de sensores en USB1 y viceversa)
+ERROR: Panel Admin muestra "—" en todos los campos de telemetria
+  CAUSA: La telemetria del ESP32 de motores no esta llegando al dashboard.
+  SOLUCION:
+    1. Verifica que el ESP32 de motores esta conectado en PORT_MOTORES
+    2. En el log del sistema (grandroot.log) busca errores de
+       "[CONTROL][ERROR]" que indicarian problema en la comunicacion Serial
+    3. Verifica que el ESP32 de motores esta publicando telemetria:
+       abre minicom en PORT_MOTORES y verifica que aparecen JSONs con "tel":true
+
+ERROR: "Contrasena incorrecta" al intentar abrir el Panel Admin
+  CAUSA: La contrasena ingresada no coincide con ADMIN_PASSWORD.
+  SOLUCION: La contrasena por defecto es "grandroot2025".
+  Para cambiarla: edita la linea "const ADMIN_PASSWORD = ..." en el
+  script de grandroot_dashboard.html.
+
+ERROR: Parametro enviado desde Panel Admin no tiene efecto en el robot
+  CAUSA: El comando SET_PARAM no llego al ESP32 o fue rechazado.
+  SOLUCION:
+    1. Revisa la terminal del Panel Admin — debe mostrar "[PARAM] nombre = valor → enviado"
+    2. Si no aparece ese mensaje: el SocketIO no esta conectado (revisa conn-badge)
+    3. Si aparece pero el robot no cambia: abre el Serial Monitor del ESP32 de
+       motores y verifica que aparece "[PARAM] kp = X.XX" despues de enviar
+    4. Si el serial monitor muestra "[PARAM][WARN] Parametro desconocido":
+       el nombre del parametro no coincide — verifica que sea exactamente
+       "kp", "ki", "pulsos_max" o "sample_ms" (minusculas, sin espacios)
+
+ERROR: Los puertos se invierten al reiniciar
   CAUSA: Linux asigna /dev/ttyUSBx en orden de deteccion, que puede cambiar.
   SOLUCION (reglas udev):
     1. Conecta solo el ESP32 de sensores
@@ -695,6 +935,11 @@ EN LA RASPBERRY PI 5:
     sudo usermod -a -G dialout $USER
     (requiere cerrar sesion y volver a entrar)
 
+  Estructura de archivos en la misma carpeta:
+    grandroot_main.py
+    grandroot_dashboard.html
+    modelo_final.h5
+
   Ejecutar el sistema:
     cd [carpeta con los archivos]
     python3 grandroot_main.py
@@ -721,6 +966,13 @@ EN LOS ESP32 (Arduino IDE):
   IMPORTANTE: Al subir codigo, desconecta el ESP32 de la Raspberry Pi
   (o apaga grandroot_main.py primero) para que el puerto Serial
   no este ocupado.
+
+  NOTA SOBRE PARAMETROS EN CALIENTE:
+    Los cambios enviados desde el Panel Admin (kp, ki, pulsos_max,
+    sample_ms) se aplican a las variables runtime del ESP32 y
+    se pierden al reiniciar o subir nuevo firmware.
+    Para hacerlos permanentes, modifica las constantes al inicio
+    de esp32_motores.ino y vuelve a compilar y subir.
 
 ================================================================================
 FIN DEL DOCUMENTO

@@ -113,6 +113,12 @@ bool dir_actual_der = true;
 volatile long cnt_izq = 0;
 volatile long cnt_der = 0;
 
+// Variables runtime — permiten cambiar estos valores en caliente
+// desde el panel admin sin recompilar ni resubir el firmware.
+// Al arrancar toman el valor de las constantes de arriba.
+int           pulsos_max_runtime = PULSOS_MAX;
+unsigned long sample_ms_runtime  = SAMPLE_MS;
+
 unsigned long t_prev_control = 0;
 
 // Buffer para el JSON entrante por Serial
@@ -210,8 +216,8 @@ void cinematica(float vx, float vy, int &ref_izq, int &ref_der) {
   omega_r /= escala;
   omega_l /= escala;
 
-  ref_izq = (int)roundf(constrain(omega_l / OMEGA_MAX, -1.0f, 1.0f) * PULSOS_MAX);
-  ref_der = (int)roundf(constrain(omega_r / OMEGA_MAX, -1.0f, 1.0f) * PULSOS_MAX);
+  ref_izq = (int)roundf(constrain(omega_l / OMEGA_MAX, -1.0f, 1.0f) * pulsos_max_runtime);
+  ref_der = (int)roundf(constrain(omega_r / OMEGA_MAX, -1.0f, 1.0f) * pulsos_max_runtime);
 
   // Referencia minima de giro para evitar alarma del driver
   if (ref_izq != 0)
@@ -284,6 +290,36 @@ void procesarComando(String& linea) {
     int ri, rd;
     cinematica(vx, vy, ri, rd);
     aplicarReferencias(ri, rd);
+
+  } else if (linea.indexOf("\"SET_PARAM\"") >= 0) {
+    // Ajuste de parámetros en caliente desde el panel admin
+    // Formato: {"cmd":"SET_PARAM","param":"kp","value":8.0}
+    int idx_param = linea.indexOf("\"param\":\"");
+    int idx_value = linea.indexOf("\"value\":");
+    if (idx_param < 0 || idx_value < 0) {
+      Serial.println("[PARAM][ERROR] Formato invalido en SET_PARAM.");
+      return;
+    }
+    int p_start = idx_param + 9;
+    int p_end   = linea.indexOf("\"", p_start);
+    String nombre = linea.substring(p_start, p_end);
+    float valor   = linea.substring(idx_value + 8).toFloat();
+
+    if (nombre == "kp") {
+      kp = valor;
+      Serial.printf("[PARAM] kp = %.2f\n", kp);
+    } else if (nombre == "ki") {
+      ki = valor;
+      Serial.printf("[PARAM] ki = %.2f\n", ki);
+    } else if (nombre == "pulsos_max") {
+      pulsos_max_runtime = (int)valor;
+      Serial.printf("[PARAM] pulsos_max = %d\n", pulsos_max_runtime);
+    } else if (nombre == "sample_ms") {
+      sample_ms_runtime = (unsigned long)valor;
+      Serial.printf("[PARAM] sample_ms = %lu ms\n", sample_ms_runtime);
+    } else {
+      Serial.printf("[PARAM][WARN] Parametro desconocido: %s\n", nombre.c_str());
+    }
 
   } else {
     // Comando desconocido — log para diagnostico
@@ -375,7 +411,7 @@ void loop() {
 
   // ── Ciclo de control PI cada SAMPLE_MS ───────────────────────────────────
   unsigned long ahora = millis();
-  if (ahora - t_prev_control >= SAMPLE_MS) {
+  if (ahora - t_prev_control >= sample_ms_runtime) {
     t_prev_control = ahora;
 
     // Leer y resetear contadores de encoder de forma atomica
@@ -392,7 +428,7 @@ void loop() {
 
     // Ejecutar PI y enviar al DAC
     if (motores_habilitados) {
-      float T = SAMPLE_MS / 1000.0f;
+      float T = sample_ms_runtime / 1000.0f;
       stepPI(mi, T);
       stepPI(md, T);
       dacWrite(SV_IZQ, mi.dac);

@@ -158,6 +158,7 @@ class EstadoGlobal:
         # Control del sistema
         self.sistema_activo = True    # False = apagar todos los hilos
         self.motores_on     = False   # True = motores habilitados
+        self.param_pendiente = None   # dict {"param":..., "value":...} o None
 
     def leer(self):
         """Devuelve una copia del estado completo como dict (thread-safe)."""
@@ -443,6 +444,17 @@ def hilo_control(ser_motores: serial.Serial):
             log.error("[CONTROL][ERROR] El ESP32 de motores puede haberse desconectado.")
             break
 
+        # ── Enviar parámetro pendiente si el admin lo solicitó ────────────
+        with estado._lock:
+            pendiente = estado.param_pendiente
+            estado.param_pendiente = None
+
+        if pendiente:
+            cmd = {"cmd": "SET_PARAM", "param": pendiente["param"], "value": pendiente["value"]}
+            _enviar_comando(ser_motores, cmd)
+            log.info("[CONTROL] Parámetro enviado al ESP32: %s = %s",
+                     pendiente["param"], pendiente["value"])
+
         # ── Calcular y enviar comando de movimiento ────────────────────────
         angulo    = estado.angulo
         confianza = estado.confianza
@@ -588,6 +600,31 @@ def on_emergency(data=None):
     """El dashboard puede enviar una parada de emergencia."""
     log.warning("[WEB][EMERGENCIA] Parada de emergencia solicitada desde el dashboard.")
     estado.sistema_activo = False
+
+
+@socketio.on("set_param")
+def on_set_param(data):
+    """
+    El panel admin del dashboard envía un parámetro nuevo para el ESP32 de motores.
+    Ejemplo: {"param": "kp", "value": 8.0}
+    Parámetros soportados: kp, ki, sample_ms, pulsos_max
+    El comando llega al hilo_control que lo reenvía al ESP32 por Serial.
+    """
+    param = data.get("param")
+    value = data.get("value")
+    params_validos = {"kp", "ki", "sample_ms", "pulsos_max"}
+
+    if param not in params_validos:
+        log.warning("[WEB][PARAM] Parámetro desconocido recibido: %s", param)
+        return
+    if value is None or not isinstance(value, (int, float)) or value <= 0:
+        log.warning("[WEB][PARAM] Valor inválido para %s: %s", param, value)
+        return
+
+    log.info("[WEB][PARAM] Recibido %s = %s desde el dashboard admin.", param, value)
+    with estado._lock:
+        estado.param_pendiente = {"param": param, "value": value}
+
 
 
 def hilo_broadcast():
