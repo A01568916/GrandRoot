@@ -2,7 +2,7 @@
 
 **Carrito autónomo para análisis inteligente del suelo.**
 
-GrandRoot es un sistema autónomo terrestre diseñado para **recolectar, analizar y procesar datos agrícolas en tiempo real**, ayudando a mejorar la toma de decisiones en agricultura de precisión.
+GrandRoot es un sistema autónomo terrestre diseñado para **analizar y procesar datos agrícolas en tiempo real**, ayudando a mejorar la toma de decisiones en agricultura de precisión en cuanto a fertilización.
 
 ## Tabla de contenidos
 
@@ -19,13 +19,6 @@ GrandRoot es un sistema autónomo terrestre diseñado para **recolectar, analiza
 - [Licencia](#licencia)
 - [Contacto](#contacto)
 
-## ¿Qué mide?
-
-- Humedad del suelo
-- pH
-- Temperatura
-- Conductividad eléctrica
-- Condiciones ambientales
 
 ## ¿Qué problema resuelve?
 
@@ -38,7 +31,7 @@ En agricultura tradicional suele haber:
 
 GrandRoot lo mejora mediante:
 
-- Automatización del análisis del suelo
+- Automatización de fertilización
 - Recolección continua de datos
 - Procesamiento inteligente
 - Soporte para decisiones agrícolas
@@ -49,6 +42,7 @@ GrandRoot lo mejora mediante:
 - Recolectar datos del suelo en tiempo real.
 - Procesar información mediante algoritmos inteligentes.
 - Generar recomendaciones para el agricultor.
+- Aplicar biofertilizantes basado en las necesidades de la planta.
 
 ## Arquitectura del sistema
 
@@ -59,20 +53,17 @@ El sistema está compuesto por cinco módulos principales:
    - Motores y controladores
    - Sistema de dirección
 2. **🔍 Sensores**
-   - Sensor de humedad del suelo
-   - Sensor de pH
-   - Sensor de temperatura
    - GPS (posicionamiento)
    - IMU (orientación y movimiento)
    - Sensores de proximidad (evitación de obstáculos)
 3. **🧠 Unidad de control**
-   - Microcontrolador (Arduino / ESP32)
-   - Computadora embebida (Raspberry Pi opcional)
+   - Microcontrolador (ESP32)
+   - Computadora embebida (Raspberry Pi 5)
    - Procesamiento de datos
 4. **📡 Comunicación**
-   - WiFi / Bluetooth / LoRa
+   - WiFi / Bluetooth 
    - Transmisión de datos en tiempo real
-   - Integración con la nube (opcional)
+   - Integración con la nube 
 5. **🤖 Software inteligente**
    - Algoritmos de navegación autónoma
    - Procesamiento de datos agrícolas
@@ -81,7 +72,6 @@ El sistema está compuesto por cinco módulos principales:
 ## Funcionalidades
 
 - Navegación autónoma
-- Recolección de datos del suelo
 - Geolocalización de mediciones
 - Evitación de obstáculos
 - Monitoreo en tiempo real
@@ -91,16 +81,24 @@ El sistema está compuesto por cinco módulos principales:
 
 ```text
 GrandRoot/
-├── hardware/
+├── Pruebas/
 │   ├── esquemas/
 │   └── componentes/
-├── firmware/
+├── Control/
 │   ├── sensores/
 │   └── control_motores/
-├── software/
+├── Navegación/
 │   ├── navegación/
 │   └── procesamiento_datos/
-├── docs/
+├── Interfaz/
+│   ├── marco_teorico/
+│   ├── analisis_factibilidad/
+│   └── diagramas/
+├── Sensores/
+│   ├── marco_teorico/
+│   ├── analisis_factibilidad/
+│   └── diagramas/
+├── Comunicación/
 │   ├── marco_teorico/
 │   ├── analisis_factibilidad/
 │   └── diagramas/
@@ -120,9 +118,9 @@ GrandRoot/
 ### Software
 
 - Python
-- C/C++ (Arduino)
+- C/C++ (ESP32)
 - ROS (opcional)
-- Algoritmos de navegación
+- Algoritmos de navegación por visión
 
 ## Aplicaciones
 
