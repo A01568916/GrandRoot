@@ -59,7 +59,7 @@ AsyncWebSocket ws("/ws");
 #define FR_IZQ         14
 #define FR_DER         27
 
-#define EN_IZQ         13
+#define EN_IZQ         21
 #define EN_DER         33
 
 #define ENC_IZQ        32
@@ -220,7 +220,7 @@ void enableMotores(bool on) {
   } else {
     dacWrite(SV_SIGNAL_IZQ, 0);
     dacWrite(SV_SIGNAL_DER, 0);
-    pinMode(EN_IZQ, INPUT_PULLUP);
+    pinMode(EN_IZQ, INPUT);
     pinMode(EN_DER, INPUT);
     motor_i.integral = 0;
     motor_i.u        = 0;
