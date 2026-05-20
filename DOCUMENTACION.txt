@@ -215,8 +215,7 @@ CONFIGURACION — PINES (al inicio del archivo):
   FR_DER (27) / FR_IZQ (14):
     Pines de direccion (Forward/Reverse). Digital OUTPUT.
     Controlan el sentido de giro del motor.
-    Nota: la logica esta invertida entre IZQ y DER (heredado del hardware).
-    setDirIzq: LOW=adelante. setDirDer: HIGH=adelante.
+    setDirIzq: HIGH=adelante. setDirDer: HIGH=adelante.
 
   EN_DER (33) / EN_IZQ (13):
     Pines de enable del driver. LOW = driver habilitado.
