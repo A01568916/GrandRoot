@@ -137,7 +137,7 @@ unsigned long t_prev = 0;
 // =====================================================
 
 void setDirIzq(bool adelante) {
-  digitalWrite(FR_IZQ, adelante ? HIGH : LOW);
+  digitalWrite(FR_IZQ, adelante ? LOW : HIGH);
 }
 
 void setDirDer(bool adelante) {
@@ -220,7 +220,7 @@ void enableMotores(bool on) {
   } else {
     dacWrite(SV_SIGNAL_IZQ, 0);
     dacWrite(SV_SIGNAL_DER, 0);
-    pinMode(EN_IZQ, INPUT);
+    pinMode(EN_IZQ, INPUT_PULLUP);
     pinMode(EN_DER, INPUT);
     motor_i.integral = 0;
     motor_i.u        = 0;
