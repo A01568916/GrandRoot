@@ -28,7 +28,7 @@ void setup() {
   pinMode(EN_DER, OUTPUT);
   pinMode(EN_IZQ, OUTPUT);
   pinMode(FR_DER, OUTPUT); //LOW PARA REVERSA HIGH PARA DELANTE
-  pinMode(FR_IZQ, OUTPUT); //LOW PARA DELANTE HIGH PARA REVERSA
+  pinMode(FR_IZQ, OUTPUT); //LOW PARA REVERSA HIGH PARA DELANTE
 
   Serial.println("Ingresa el caso (A, B, C, D) o voltaje en mV (0-3300):");
 }

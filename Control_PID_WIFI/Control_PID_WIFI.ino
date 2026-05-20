@@ -141,7 +141,7 @@ void setDirIzq(bool adelante) {
 }
 
 void setDirDer(bool adelante) {
-  digitalWrite(FR_DER, adelante ? HIGH : LOW);
+  digitalWrite(FR_DER, adelante ? LOW : HIGH);
 }
 
 // =====================================================

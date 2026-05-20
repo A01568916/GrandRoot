@@ -43,7 +43,7 @@ void setup() {
   digitalWrite(EN_DER, HIGH);
   digitalWrite(EN_IZQ, HIGH);
   digitalWrite(FR_DER, LOW); // adelante
-  digitalWrite(FR_IZQ, HIGH); // adelante
+  digitalWrite(FR_IZQ, LOW); // adelante
 
   
   attachInterrupt(digitalPinToInterrupt(ENC_DER), contarDer, RISING);
