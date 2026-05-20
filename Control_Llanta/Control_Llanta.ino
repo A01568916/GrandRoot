@@ -1,7 +1,7 @@
 #define SV_SIGNAL_IZQ 25
 #define SV_SIGNAL_DER 26
 #define EN_DER 33
-#define EN_IZQ 13
+#define EN_IZQ 21
 #define FR_DER 27
 #define FR_IZQ 14
 
@@ -28,7 +28,7 @@ void setup() {
   pinMode(EN_DER, OUTPUT);
   pinMode(EN_IZQ, OUTPUT);
   pinMode(FR_DER, OUTPUT); //LOW PARA REVERSA HIGH PARA DELANTE
-  pinMode(FR_IZQ, OUTPUT); //LOW PARA REVERSA HIGH PARA DELANTE
+  pinMode(FR_IZQ, OUTPUT); //HIGH PARA REVERSA LOW PARA DELANTE
 
   Serial.println("Ingresa el caso (A, B, C, D) o voltaje en mV (0-3300):");
 }

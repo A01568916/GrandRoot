@@ -6,7 +6,7 @@
 #define ENC_DER 32
 #define ENC_IZQ 34
 #define EN_DER 33
-#define EN_IZQ 13
+#define EN_IZQ 21
 #define FR_DER 27
 #define FR_IZQ 14
 
@@ -43,7 +43,7 @@ void setup() {
   digitalWrite(EN_DER, HIGH);
   digitalWrite(EN_IZQ, HIGH);
   digitalWrite(FR_DER, HIGH); // adelante
-  digitalWrite(FR_IZQ, HIGH); // adelante
+  digitalWrite(FR_IZQ, LOW); // adelante
 
   
   attachInterrupt(digitalPinToInterrupt(ENC_DER), contarDer, RISING);

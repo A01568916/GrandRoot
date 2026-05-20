@@ -37,7 +37,7 @@ String serialBuffer = "";
 #define FR_IZQ         14
 #define FR_DER         27
 
-#define EN_IZQ         13
+#define EN_IZQ         21
 #define EN_DER         33
 
 #define ENC_IZQ        32
@@ -153,7 +153,7 @@ unsigned long t_prev = 0;
 // =====================================================
 
 void setDirIzq(bool adelante) {
-  digitalWrite(FR_IZQ, adelante ? HIGH : LOW);
+  digitalWrite(FR_IZQ, adelante ? LOW : HIGH);
 }
 
 void setDirDer(bool adelante) {
