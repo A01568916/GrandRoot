@@ -9,7 +9,7 @@
  ║      D27 → FR_Derecha      (direccion motor derecho)                        ║
  ║      D26 → SV_Driver_DER   (señal de velocidad, DAC)                        ║
  ║      D33 → Enable_Derecha  (habilitar driver)                               ║
- ║      D34 → PG_DER_IN       (encoder motor derecho, INPUT ONLY)              ║
+ ║      D34 → PG_DER_IN       (encoder motor derecho, INPUT ONLY)              ║fr
  ║                                                                              ║
  ║    Driver Izquierdo:                                                         ║
  ║      D13 → Enable_Izquierda (habilitar driver)                              ║
@@ -138,7 +138,7 @@ void IRAM_ATTR isr_der() { cnt_der++; }
 void setDirIzq(bool adelante) {
   // El driver izquierdo tiene logica invertida respecto al derecho
   // (segun tu codigo original: IZQ LOW=adelante, DER HIGH=adelante)
-  digitalWrite(FR_IZQ, adelante ? LOW : HIGH);
+  digitalWrite(FR_IZQ, adelante ? HIGH : LOW);
 }
 
 void setDirDer(bool adelante) {
