@@ -42,8 +42,8 @@ void setup() {
   // Activar motores (igual que tu caso E)
   digitalWrite(EN_DER, HIGH);
   digitalWrite(EN_IZQ, HIGH);
-  digitalWrite(FR_DER, LOW); // adelante
-  digitalWrite(FR_IZQ, LOW); // adelante
+  digitalWrite(FR_DER, HIGH); // adelante
+  digitalWrite(FR_IZQ, HIGH); // adelante
 
   
   attachInterrupt(digitalPinToInterrupt(ENC_DER), contarDer, RISING);

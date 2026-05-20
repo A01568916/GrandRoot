@@ -137,11 +137,11 @@ unsigned long t_prev = 0;
 // =====================================================
 
 void setDirIzq(bool adelante) {
-  digitalWrite(FR_IZQ, adelante ? LOW : HIGH);
+  digitalWrite(FR_IZQ, adelante ? HIGH : LOW);
 }
 
 void setDirDer(bool adelante) {
-  digitalWrite(FR_DER, adelante ? LOW : HIGH);
+  digitalWrite(FR_DER, adelante ? HIGH : LOW);
 }
 
 // =====================================================
