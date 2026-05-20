@@ -12,7 +12,7 @@
  ║      D34 → PG_DER_IN       (encoder motor derecho, INPUT ONLY)              ║fr
  ║                                                                              ║
  ║    Driver Izquierdo:                                                         ║
- ║      D13 → Enable_Izquierda (habilitar driver)                              ║
+ ║      D21 → Enable_Izquierda (habilitar driver)                              ║
  ║      D14 → FR_Izquierda     (direccion motor izquierdo)                     ║
  ║      D25 → SV_Driver_IZQ    (señal de velocidad, DAC)                       ║
  ║      D32 → PG_IZQ_IN        (encoder motor izquierdo)                       ║
@@ -45,7 +45,7 @@
 // Motor IZQUIERDO
 #define SV_IZQ    25    // DAC output → SV_Driver_IZQ (OpAmp+)
 #define FR_IZQ    14    // Direccion motor izquierdo
-#define EN_IZQ    13    // Enable driver izquierdo
+#define EN_IZQ    21    // Enable driver izquierdo
 #define ENC_IZQ   32    // Encoder izquierdo (PG_IZQ_IN)
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -138,7 +138,7 @@ void IRAM_ATTR isr_der() { cnt_der++; }
 void setDirIzq(bool adelante) {
   // El driver izquierdo tiene logica invertida respecto al derecho
   // (segun tu codigo original: IZQ LOW=adelante, DER HIGH=adelante)
-  digitalWrite(FR_IZQ, adelante ? HIGH : LOW);
+  digitalWrite(FR_IZQ, adelante ? LOW : HIGH);
 }
 
 void setDirDer(bool adelante) {
