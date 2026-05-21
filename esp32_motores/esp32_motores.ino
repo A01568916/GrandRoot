@@ -138,11 +138,11 @@ void IRAM_ATTR isr_der() { cnt_der++; }
 void setDirIzq(bool adelante) {
   // El driver izquierdo tiene logica invertida respecto al derecho
   // (segun tu codigo original: IZQ LOW=adelante, DER HIGH=adelante)
-  digitalWrite(FR_IZQ, adelante ? LOW : HIGH);
+  digitalWrite(FR_IZQ, adelante ? HIGH : LOW);
 }
 
 void setDirDer(bool adelante) {
-  digitalWrite(FR_DER, adelante ? HIGH : LOW);
+  digitalWrite(FR_DER, adelante ? LOW : HIGH);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
