@@ -31,8 +31,8 @@ WebServer server(80);
 // ── Pines (drivers BLDC WS55-220) ───────────────────────────────────────────
 #define SV_SIGNAL_IZQ  25   // DAC → velocidad motor izquierdo
 #define SV_SIGNAL_DER  26   // DAC → velocidad motor derecho
-#define FR_IZQ         14   // LOW = adelante, HIGH = atrás
-#define FR_DER         27   // HIGH = adelante, LOW = atrás  
+#define FR_IZQ         14   // HIGH = adelante, LOW = atrás
+#define FR_DER         27   // LOW = adelante, HIGH = atrás  
 #define EN_IZQ         21   // OUTPUT+LOW = activo | INPUT = desactivado (alta impedancia)
 #define EN_DER         33   // idem
 #define ENC_IZQ        32
@@ -78,10 +78,10 @@ void enableMotores(bool on) {
 }
 
 // ── Helpers dirección WS55-220 ───────────────────────────────────────────────
-// FR_IZQ: LOW = adelante, HIGH = atrás
-// FR_DER: HIGH = adelante, LOW = atrás  
-void setDirIzq(bool adelante) { digitalWrite(FR_IZQ, adelante ? LOW  : HIGH); }
-void setDirDer(bool adelante) { digitalWrite(FR_DER, adelante ? HIGH : LOW);  }
+// FR_IZQ: HIGH = adelante, LOW = atrás
+// FR_DER: LOW = adelante, HIGH = atrás  
+void setDirIzq(bool adelante) { digitalWrite(FR_IZQ, adelante ? HIGH  : LOW); }
+void setDirDer(bool adelante) { digitalWrite(FR_DER, adelante ? LOW : HIGH);  }
 
 // ── Cinemática inversa diferencial ────────────────────────────────────────
 void cinematica(float vx, float vy, int &ref_izq, int &ref_der) {

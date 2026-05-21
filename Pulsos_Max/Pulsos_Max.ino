@@ -14,8 +14,8 @@
 // ── Pines (drivers BLDC WS55-220) ───────────────────────────────────────────
 #define DAC_IZQ  25   // DAC → velocidad motor izquierdo
 #define DAC_DER  26   // DAC → velocidad motor derecho
-#define FR_IZQ         14   // LOW = adelante, HIGH = atrás
-#define FR_DER         27   // HIGH = adelante, LOW = atrás  
+#define FR_IZQ         14   // HIGH = adelante, LOW = atrás
+#define FR_DER         27   // LOW = adelante, HIGH = atrás  
 #define EN_IZQ         21   // OUTPUT+LOW = activo | INPUT = desactivado
 #define EN_DER         33   // idem
 #define ENC_IZQ        32
@@ -44,7 +44,7 @@ void setup() {
     pinMode(FR_IZQ, OUTPUT);
     pinMode(FR_DER, OUTPUT);
     digitalWrite(FR_IZQ, LOW);
-    digitalWrite(FR_DER, HIGH); 
+    digitalWrite(FR_DER, LOW); 
 
     dacWrite(DAC_IZQ, 0);
     dacWrite(DAC_DER, 0);

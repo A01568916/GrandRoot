@@ -27,8 +27,8 @@ void setup() {
 
   pinMode(EN_DER, OUTPUT);
   pinMode(EN_IZQ, OUTPUT);
-  pinMode(FR_DER, OUTPUT); //LOW PARA REVERSA HIGH PARA DELANTE
-  pinMode(FR_IZQ, OUTPUT); //HIGH PARA REVERSA LOW PARA DELANTE
+  pinMode(FR_DER, OUTPUT); //HIGH PARA REVERSA LOW PARA DELANTE
+  pinMode(FR_IZQ, OUTPUT); //LOW PARA REVERSA HIGH PARA DELANTE
 
   Serial.println("Ingresa el caso (A, B, C, D) o voltaje en mV (0-3300):");
 }
@@ -55,19 +55,19 @@ void loop() {
       digitalWrite(EN_DER, HIGH);
       digitalWrite(EN_IZQ, HIGH);
       digitalWrite(FR_DER, LOW);
-      digitalWrite(FR_IZQ, HIGH);
+      digitalWrite(FR_IZQ, LOW);
 
     } else if (input == "D") { //MOTORES PRENDIDOS, LLANTAS ROTACION DIFERENCIAL, IZQ AVANZA, DER RETROCEDE
       digitalWrite(EN_DER, HIGH);
       digitalWrite(EN_IZQ, HIGH);
       digitalWrite(FR_DER, HIGH);
-      digitalWrite(FR_IZQ, LOW);
+      digitalWrite(FR_IZQ, HIGH);
 
     }else if (input == "E") {//MOTORES PRENDIDOS, LLANTAS EN MISMA DIRECCION HACIA DELANTE, FR'S EN 0
       digitalWrite(EN_DER, HIGH);
       digitalWrite(EN_IZQ, HIGH);
       digitalWrite(FR_DER, LOW);
-      digitalWrite(FR_IZQ, LOW);
+      digitalWrite(FR_IZQ, HIGH);
 
     }
     else {
