@@ -1,0 +1,74 @@
+GRANDROOT — Control de LEDs
+===========================
+
+ARQUITECTURA
+------------
+Laptop (navegador) → Raspberry Pi (servidor) → ESP32 (LEDs)
+
+
+ARCHIVOS
+--------
+
+1. index.html
+   Página web con dos botones circulares (Rojo y Azul).
+   Al presionar un botón, manda una petición HTTP POST a la
+   Raspberry Pi con el color elegido.
+
+2. server.py
+   Servidor Flask que corre en la Raspberry Pi.
+   Hace dos cosas:
+   - Sirve el index.html cuando la laptop abre el navegador.
+   - Recibe las peticiones del navegador y las reenvía al
+     ESP32 por cable USB (comunicación Serial).
+   Manda 'R' para rojo y 'B' para azul.
+
+3. leds.ino
+   Código del ESP32.
+   Escucha el puerto Serial esperando comandos:
+   - Si recibe 'R' → enciende LED rojo, apaga azul.
+   - Si recibe 'B' → enciende LED azul, apaga rojo.
+
+
+CONEXIONES ESP32
+----------------
+- LED Rojo  → GPIO 2  (+ resistencia 220Ω a GND)
+- LED Azul  → GPIO 4  (+ resistencia 220Ω a GND)
+- ESP32     → Raspberry Pi por cable USB
+
+
+CÓMO CORRERLO
+-------------
+1. Cargar leds.ino al ESP32 desde Arduino IDE.
+2. Conectar ESP32 a la Pi por USB.
+3. En la Pi, activar entorno virtual:
+      source venv/bin/activate
+4. Correr el servidor:
+      python3 server.py
+5. Abrir en el navegador de la laptop:
+      http://<IP_de_la_Pi>:8080
+
+COMANDOS ÚTILES EN LA RASPBERRY PI
+-----------------------------------
+
+Encontrar el puerto USB del ESP32:
+      ls /dev/ttyUSB* /dev/ttyACM*
+   Generalmente aparece como /dev/ttyUSB0.
+   Si no aparece nada, revisa el cable o reconecta el ESP32.
+
+Ver la IP de la Raspberry Pi:
+      hostname -I
+   Usa la primera IP (ej. 192.168.x.x o 172.x.x.x).
+
+Activar el entorno virtual:
+      source venv/bin/activate
+
+Detener el servidor:
+      Ctrl + C
+
+
+NOTA IMPORTANTE
+---------------
+La laptop y la Raspberry Pi deben estar conectadas a la
+misma red (por ejemplo, el mismo hotspot del celular).
+Si están en redes diferentes, el navegador no podrá
+alcanzar al servidor y no cargará la página.

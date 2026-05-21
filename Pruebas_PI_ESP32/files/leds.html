@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GrandRoot — LEDs</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@700&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      background: #0d0d0d;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 60px;
+      font-family: 'Space Mono', monospace;
+    }
+
+    h1 {
+      color: #fff;
+      font-size: 13px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      opacity: 0.4;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 80px;
+      align-items: center;
+    }
+
+    .btn {
+      width: 200px;
+      height: 200px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      font-family: 'Space Mono', monospace;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: #fff;
+      transition: transform 0.1s, box-shadow 0.1s;
+      position: relative;
+    }
+
+    .btn-rojo {
+      background: #cc1111;
+      box-shadow: 0 0 40px #cc111166, 0 0 0 4px #ff000033;
+    }
+    .btn-rojo:hover {
+      box-shadow: 0 0 60px #ff0000aa, 0 0 0 8px #ff000055;
+    }
+    .btn-rojo:active, .btn-rojo.active {
+      transform: scale(0.94);
+      background: #ff2222;
+      box-shadow: 0 0 80px #ff0000cc, 0 0 0 12px #ff000077;
+    }
+
+    .btn-azul {
+      background: #1133cc;
+      box-shadow: 0 0 40px #1133cc66, 0 0 0 4px #0044ff33;
+    }
+    .btn-azul:hover {
+      box-shadow: 0 0 60px #0044ffaa, 0 0 0 8px #0044ff55;
+    }
+    .btn-azul:active, .btn-azul.active {
+      transform: scale(0.94);
+      background: #2244ff;
+      box-shadow: 0 0 80px #0044ffcc, 0 0 0 12px #0044ff77;
+    }
+
+    .status {
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: #ffffff33;
+      text-transform: uppercase;
+    }
+    .status span {
+      color: #00ff88;
+    }
+    .status span.err {
+      color: #ff4444;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>GrandRoot — Control LEDs</h1>
+
+  <div class="buttons">
+    <button class="btn btn-rojo" onclick="enviar('rojo')">Rojo</button>
+    <button class="btn btn-azul" onclick="enviar('azul')">Azul</button>
+  </div>
+
+  <div class="status" id="status">Esperando...</div>
+
+  <script>
+    async function enviar(color) {
+      const status = document.getElementById('status');
+      try {
+        const res = await fetch('/led', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ color })
+        });
+        if (res.ok) {
+          status.innerHTML = `LED <span>${color.toUpperCase()}</span> enviado`;
+        } else {
+          status.innerHTML = `<span class="err">Error del servidor</span>`;
+        }
+      } catch (e) {
+        status.innerHTML = `<span class="err">Sin conexión al servidor</span>`;
+      }
+    }
+  </script>
+
+</body>
+</html>
