@@ -1,0 +1,206 @@
+================================================================
+  GRANDROOT — Documentación: Servicio systemd en Raspberry Pi
+================================================================
+
+¿Qué es systemd?
+----------------
+systemd es el gestor de servicios de Linux (y por tanto de Raspberry
+Pi OS). Registrar tu script Python como un servicio .service permite:
+
+  • Que arranque automáticamente al encender la RPi
+  • Que se reinicie solo si falla o si el ESP32 se desconecta
+  • Controlarlo fácilmente con comandos estándar (start/stop/status)
+
+
+================================================================
+  1. CREAR EL ARCHIVO DE SERVICIO
+================================================================
+
+Abre el editor como superusuario:
+
+    sudo nano /etc/systemd/system/grandroot.service
+
+Pega el siguiente contenido (ajusta las rutas si es necesario):
+
+------------------------------------------------------------
+[Unit]
+Description=GrandRoot Bridge — Serial USB <-> WebSocket
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/grandroot
+ExecStart=/usr/bin/python3 /home/pi/grandroot/grandroot_bridge.py --port /dev/ttyUSB0
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+------------------------------------------------------------
+
+Guarda con Ctrl+O  →  Enter  →  Ctrl+X
+
+
+================================================================
+  2. ACTIVAR E INICIAR EL SERVICIO
+================================================================
+
+Ejecuta estos comandos en orden:
+
+    # Recargar systemd para que detecte el nuevo archivo
+    sudo systemctl daemon-reload
+
+    # Activar: que arranque solo al encender la RPi
+    sudo systemctl enable grandroot
+
+    # Iniciarlo ahora mismo (sin necesidad de reiniciar)
+    sudo systemctl start grandroot
+
+
+================================================================
+  3. COMANDOS ÚTILES DEL DÍA A DÍA
+================================================================
+
+    sudo systemctl status grandroot      → Ver si está corriendo + últimos logs
+    sudo systemctl stop grandroot        → Detenerlo manualmente
+    sudo systemctl restart grandroot     → Reiniciarlo (ej. tras editar el script)
+    sudo systemctl disable grandroot     → Que ya no arranque solo al encender
+    journalctl -u grandroot -f           → Ver los logs en tiempo real
+
+
+================================================================
+  4. EXPLICACIÓN DE LAS SECCIONES DEL ARCHIVO .service
+================================================================
+
+[Unit]
+  Description   → Nombre descriptivo del servicio
+  After=network.target
+                → Espera a que la red esté lista antes de arrancar
+                  (necesario porque el WebSocket usa la red)
+
+[Service]
+  User=pi       → Corre como el usuario "pi", no como root (más seguro)
+  WorkingDirectory
+                → Carpeta donde están grandroot_bridge.py e index.html
+                  IMPORTANTE: ambos archivos deben estar juntos aquí
+  ExecStart     → Comando exacto para arrancar el script
+  Restart=on-failure
+                → Si el script falla (p.ej. se desconecta el USB),
+                  systemd lo reinicia automáticamente
+  RestartSec=5  → Espera 5 segundos antes de cada reintento
+
+[Install]
+  WantedBy=multi-user.target
+                → Arranca en el modo normal de operación de la RPi
+
+
+================================================================
+  5. SOLUCIÓN AL PROBLEMA DEL PUERTO SERIAL VARIABLE
+================================================================
+
+El ESP32 puede aparecer como /dev/ttyUSB0 o /dev/ttyACM0 dependiendo
+del cable o del orden de conexión. Para fijar siempre el mismo nombre:
+
+  PASO A — Identificar el idVendor e idProduct del ESP32
+
+    lsusb
+
+  Busca una línea como:
+    Bus 001 Device 003: ID 10c4:ea60 Silicon Labs CP210x UART Bridge
+
+  Los valores son:
+    idVendor  = 10c4   (Silicon Labs CP2102, el más común en ESP32)
+    idProduct = ea60
+
+  Si tu ESP32 usa otro chip (CH340), los valores serán distintos.
+  Confirma con: udevadm info -a /dev/ttyUSB0 | grep idVendor
+
+------------------------------------------------------------
+
+  PASO B — Crear la regla udev
+
+    sudo nano /etc/udev/rules.d/99-esp32.rules
+
+  Pega:
+
+    SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="ttyESP32"
+
+  Guarda y aplica:
+
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger
+
+  Desconecta y vuelve a conectar el ESP32 por USB.
+  Ahora siempre estará disponible en /dev/ttyESP32
+
+------------------------------------------------------------
+
+  PASO C — Actualizar el servicio para usar el nuevo nombre
+
+  Edita /etc/systemd/system/grandroot.service y cambia la línea:
+
+    ExecStart=... --port /dev/ttyUSB0
+
+  Por:
+
+    ExecStart=... --port /dev/ttyESP32
+
+  Recarga y reinicia:
+
+    sudo systemctl daemon-reload
+    sudo systemctl restart grandroot
+
+
+================================================================
+  6. VERIFICAR QUE TODO FUNCIONA
+================================================================
+
+  1. Reinicia la RPi:
+       sudo reboot
+
+  2. Espera ~30 segundos y desde tu PC/celular abre:
+       http://<IP-de-la-RPi>:8080
+
+  3. Verifica el estado del servicio:
+       sudo systemctl status grandroot
+
+     Deberías ver algo como:
+       ● grandroot.service - GrandRoot Bridge
+            Loaded: loaded (/etc/systemd/system/grandroot.service; enabled)
+            Active: active (running) since ...
+
+
+================================================================
+  7. ESTRUCTURA DE ARCHIVOS ESPERADA EN LA RPi
+================================================================
+
+  /home/pi/grandroot/
+  ├── grandroot_bridge.py    ← Script Python del bridge
+  └── index.html             ← Interfaz web
+
+  /etc/systemd/system/
+  └── grandroot.service      ← Archivo de servicio
+
+  /etc/udev/rules.d/
+  └── 99-esp32.rules         ← Regla de puerto fijo (opcional)
+
+
+================================================================
+  REFERENCIA RÁPIDA
+================================================================
+
+  Instalar dependencias Python:
+    pip install pyserial websockets
+
+  Primer arranque manual (para probar antes de activar el servicio):
+    cd /home/pi/grandroot
+    python3 grandroot_bridge.py --port /dev/ttyUSB0
+
+  Ver logs en vivo una vez que el servicio está activo:
+    journalctl -u grandroot -f
+
+================================================================
+  GrandRoot — Proyecto de Agricultura de Precisión
+  Equipo Mecatrónica / Mecánica / Biotecnología — ITESM
+================================================================
