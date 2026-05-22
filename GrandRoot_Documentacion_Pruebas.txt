@@ -1,0 +1,965 @@
+================================================================================
+  GRANDROOT — DOCUMENTACIÓN DE CÓDIGO (Carpeta: Pruebas)
+  Proyecto: Carrito autónomo para análisis inteligente del suelo
+  Plataforma principal: ESP32 + Raspberry Pi 5
+================================================================================
+
+ÍNDICE
+------
+  1.  Contador_Pulsos / Contador_Pulsos.ino
+  2.  Control_Llanta / Control_Llanta.ino
+  3.  Pulsos_Max / Pulsos_Max.ino
+  4.  Tabla_DAC_DOWN / Tabla_DAC_DOWN.ino
+  5.  Tabla_DAC_UP / Tabla_DAC_UP.ino
+  6.  MPU9250 / MPU9250.ino
+  7.  Control_PID_Serial / Control_PID_Serial.ino
+  8.  Control_PID_WIFI / Control_PID_WIFI.ino
+  9.  Prueba_HTML_WIFI / Prueba_HTML_WIFI.ino
+ 10.  Pruebas_carrito_escala / Carrito_Vision / Carrito_Vision.ino
+ 11.  Pruebas_carrito_escala / robot_vision_serial.py
+ 12.  Pruebas_PI_ESP32 / files / leds.ino
+ 13.  Pruebas_PI_ESP32 / files / server.py
+ 14.  Control_PID_RBPI / grandroot_bridge.py
+ 15.  DIAGRAMA DE CONEXIONES DE PINES (resumen general)
+ 16.  RELACIÓN ENTRE ARCHIVOS (qué se conecta con qué)
+
+================================================================================
+1. Contador_Pulsos.ino
+================================================================================
+
+PROPÓSITO
+  Prueba de integración motores + encoders. Permite controlar los dos motores
+  BLDC por comandos de texto desde el Monitor Serial y, al mismo tiempo, lee
+  los encoders de cada rueda cada segundo para verificar que los sensores
+  funcionan correctamente.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Ninguna externa (solo API de Arduino/ESP32).
+
+PINES USADOS
+  GPIO 25  — DAC SV_SIGNAL_IZQ  → señal analógica de velocidad motor izquierdo
+  GPIO 26  — DAC SV_SIGNAL_DER  → señal analógica de velocidad motor derecho
+  GPIO 14  — FR_IZQ             → dirección motor izquierdo (HIGH=adelante)
+  GPIO 27  — FR_DER             → dirección motor derecho  (LOW=adelante)
+  GPIO 21  — EN_IZQ             → enable motor izquierdo  (OUTPUT+LOW=activo)
+  GPIO 33  — EN_DER             → enable motor derecho
+  GPIO 32  — ENC_IZQ            → señal encoder izquierdo (interrupción RISING)
+  GPIO 34  — ENC_DER            → señal encoder derecho   (interrupción RISING)
+
+HARDWARE CONECTADO
+  Drivers BLDC modelo WS55-220 (uno por rueda).
+
+FUNCIONES PRINCIPALES
+  contarDer() / contarIzq()
+    Rutinas de interrupción (ISR) marcadas con IRAM_ATTR para ejecutarse en
+    RAM interna y no perder pulsos. Se disparan en flanco RISING del encoder.
+
+  setup()
+    Inicializa Serial a 115200, configura pines de motor como OUTPUT y pines
+    de encoder como INPUT_PULLUP. Registra las dos ISR.
+
+  loop()
+    - Escucha comandos por Serial:
+        "A" → activa motores, FR en HIGH (reversa ambos)
+        "B" → desactiva motores, FR en LOW
+        "C" → ambos motores activos, DER adelante / IZQ atrás
+        "D" → ambos motores activos, DER atrás / IZQ adelante
+        "E" → ambos motores activos, FR DER=LOW / IZQ=HIGH (adelante)
+        número (0-3300) → interpreta como milivoltios y escribe en DAC
+    - Cada 1000 ms imprime pulsos acumulados de cada encoder y los resetea.
+
+FLUJO DE DATOS
+  Monitor Serial → ESP32 → DAC/pines FR/EN → Drivers WS55-220 → Motores
+  Motores (encoders) → GPIO 32/34 → ISR → contador de pulsos → Serial
+
+--------------------------------------------------------------------------------
+
+================================================================================
+2. Control_Llanta.ino
+================================================================================
+
+PROPÓSITO
+  Prueba básica de control de una sola rueda (o ambas al mismo tiempo) sin
+  encoders. Verifica la combinación de pines FR y EN con los drivers WS55-220
+  y la conversión de milivoltios a valor DAC.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Ninguna externa.
+
+PINES USADOS
+  GPIO 25  — SV_SIGNAL_IZQ (DAC velocidad izquierdo)
+  GPIO 26  — SV_SIGNAL_DER (DAC velocidad derecho)
+  GPIO 21  — EN_IZQ
+  GPIO 33  — EN_DER
+  GPIO 14  — FR_IZQ  (HIGH=reversa, LOW=adelante para este motor)
+  GPIO 27  — FR_DER  (HIGH=reversa, LOW=adelante para este motor)
+
+DIFERENCIAS CON Contador_Pulsos.ino
+  - No tiene encoders ni ISR.
+  - La inicialización de pines usa INPUT_PULLDOWN antes de cambiar a OUTPUT
+    para evitar estados flotantes en el arranque.
+  - El caso "C" y "D" tienen la lógica de FR invertida respecto al
+    Contador_Pulsos (se detectó un bug de rotación diferencial durante pruebas).
+
+FUNCIONES PRINCIPALES
+  setup()
+    Configura pines con pulldown primero, luego como OUTPUT.
+
+  loop()
+    Idéntica lógica de comandos A/B/C/D/E/número que Contador_Pulsos.ino
+    pero sin lectura periódica de encoders.
+
+NOTAS
+  Este archivo sirvió como punto de partida para entender el comportamiento
+  físico de los motores antes de agregar control PID.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+3. Pulsos_Max.ino
+================================================================================
+
+PROPÓSITO
+  Caracterización de velocidad máxima de los motores. Arranca los motores a
+  0 V durante 2 segundos (para que el driver se estabilice) y luego los lleva
+  a 3.3 V (DAC=255). Imprime por Serial una tabla CSV con el tiempo y los
+  pulsos leídos por encoder cada 200 ms.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Ninguna externa.
+
+PINES USADOS
+  GPIO 25  — DAC_IZQ
+  GPIO 26  — DAC_DER
+  GPIO 14  — FR_IZQ  (LOW = adelante)
+  GPIO 27  — FR_DER  (LOW = adelante)
+  GPIO 21  — EN_IZQ
+  GPIO 33  — EN_DER
+  GPIO 32  — ENC_IZQ (interrupción)
+  GPIO 34  — ENC_DER (interrupción)
+
+CONSTANTES CLAVE
+  SAMPLE_MS   = 200    ms entre muestras
+  ARRANQUE_MS = 2000   ms en 0 V antes de dar voltaje
+
+FUNCIONES PRINCIPALES
+  contarIzq() / contarDer()
+    ISR IRAM_ATTR para contar flancos RISING de encoders.
+
+  setup()
+    Configura pines, registra ISR, espera 2 s en 0 V,
+    luego aplica DAC=255 en ambos canales.
+    Imprime encabezado CSV: "t_ms,pulsos_izq,pulsos_der"
+
+  loop()
+    Cada SAMPLE_MS lee pulsos de forma atómica (noInterrupts/interrupts),
+    imprime la línea CSV y resetea contadores.
+
+SALIDA SERIAL (ejemplo)
+  t_ms,pulsos_izq,pulsos_der
+  2200,18,17
+  2400,22,21
+  ...
+
+USO
+  Los datos se copian a Excel/Python para calcular la velocidad máxima real
+  y calibrar el parámetro PULSOS_MAX usado en los controladores PID.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+4. Tabla_DAC_DOWN.ino
+================================================================================
+
+PROPÓSITO
+  Genera una tabla de caracterización DAC→velocidad en sentido descendente:
+  desde DAC=250 hasta DAC=0, bajando de 10 en 10. Para cada valor mide
+  pulsos durante 4 segundos y calcula velocidad en m/s.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Ninguna externa.
+
+PINES USADOS
+  GPIO 25  — SV_SIGNAL_IZQ (DAC)
+  GPIO 26  — SV_SIGNAL_DER (DAC)
+  GPIO 32  — ENC_DER (interrupción)
+  GPIO 34  — ENC_IZQ (interrupción)
+  GPIO 33  — EN_DER
+  GPIO 21  — EN_IZQ
+  GPIO 27  — FR_DER  (LOW = adelante)
+  GPIO 14  — FR_IZQ  (HIGH = adelante)
+
+CONSTANTES CLAVE
+  DIST_POR_PULSO = 0.0585 m   (circunferencia de rueda / pulsos por vuelta)
+  STEP_DAC       = 10         (paso de reducción entre mediciones)
+  Min_DAC        = 0
+  INTERVALO      = 4000 ms    (duración de cada medición)
+
+FUNCIONES PRINCIPALES
+  setup()
+    Activa motores en dirección adelante, registra ISR.
+
+  loop()
+    Bucle for de DAC=250 a DAC=0:
+      - Aplica valor DAC en ambos canales
+      - Resetea contadores de pulso
+      - Espera 4 segundos midiendo
+      - Lee pulsos de forma atómica
+      - Calcula: vel = (pulsos × DIST_POR_PULSO) / tiempo
+      - Imprime en Serial: DAC, voltaje, pulsos, velocidades
+    Al terminar, detiene motores y congela con while(true).
+
+SALIDA SERIAL (ejemplo)
+  =================================
+  DAC: 250
+  Voltaje: 3.235 V
+  Pulsos Der: 82 | Pulsos Izq: 80
+  Vel Der: 1.197 m/s | Vel Izq: 1.168 m/s
+
+RELACIÓN CON OTROS ARCHIVOS
+  Complementario a Tabla_DAC_UP. Juntos generan la curva completa de
+  transferencia DAC→velocidad para el modelo del motor.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+5. Tabla_DAC_UP.ino
+================================================================================
+
+PROPÓSITO
+  Igual que Tabla_DAC_DOWN pero en sentido ascendente: desde DAC=0 hasta
+  DAC=100 (ajustable), subiendo de 5 en 5. Incluye un reset a 0 V entre
+  cada paso para estabilizar el driver.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Ninguna externa.
+
+PINES USADOS
+  Idénticos a Tabla_DAC_DOWN.
+
+CONSTANTES CLAVE
+  DIST_POR_PULSO = 0.0585 m
+  STEP_DAC       = 5          (más fino que DOWN para detectar zona muerta)
+  MAX_DAC        = 100        (límite superior conservador)
+  TIEMPO_MEDICION = 1000 ms
+  TIEMPO_RESET    = 300 ms    (tiempo en 0 V entre pasos)
+
+DIFERENCIA PRINCIPAL CON Tabla_DAC_DOWN
+  Antes de aplicar cada nuevo valor DAC, primero escribe 0 durante
+  TIEMPO_RESET milisegundos. Esto evita que el driver interprete una señal
+  ascendente como pico de corriente y entre en protección.
+
+SALIDA SERIAL
+  Igual formato que Tabla_DAC_DOWN.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+6. MPU9250.ino
+================================================================================
+
+PROPÓSITO
+  Lee el acelerómetro y giroscopio del sensor MPU9250 vía I2C y los imprime
+  por Serial cada 100 ms. No usa librerías externas: implementa toda la
+  comunicación I2C manualmente con Wire.h.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Wire.h  (incluida en Arduino IDE, sin instalación extra)
+
+CONEXIÓN FÍSICA (I2C)
+  MPU9250 VCC  → 3.3 V del ESP32
+  MPU9250 GND  → GND
+  MPU9250 SCL  → GPIO 22  (I2C SCL por defecto del ESP32)
+  MPU9250 SDA  → GPIO 21  (I2C SDA por defecto del ESP32)
+  MPU9250 AD0  → GND      → dirección I2C = 0x68
+                 (conectar a 3.3 V para usar dirección 0x69)
+
+REGISTROS I2C USADOS
+  0x19  REG_SMPLRT_DIV   — divisor de frecuencia de muestreo
+  0x1A  REG_CONFIG       — filtro DLPF (vibraciones)
+  0x1B  REG_GYRO_CFG     — escala del giroscopio
+  0x1C  REG_ACCEL_CFG    — escala del acelerómetro
+  0x3B  REG_ACCEL_XOUT   — primer byte acelerómetro (6 bytes seguidos)
+  0x43  REG_GYRO_XOUT    — primer byte giroscopio   (6 bytes seguidos)
+  0x6B  REG_PWR_MGMT_1   — control de energía (despertar sensor)
+  0x75  REG_WHO_AM_I     — identificador chip (0x71 o 0x73)
+
+ESCALAS POR DEFECTO
+  Acelerómetro : ±2 g       → 16384 LSB/g
+  Giroscopio   : ±250 °/s   →   131 LSB/(°/s)
+
+FUNCIONES PRINCIPALES
+  escribirReg(reg, valor)
+    Escribe un byte en un registro I2C del MPU9250.
+
+  leerReg(reg)
+    Lee un byte de un registro.
+
+  leerBytes(reg, buf, n)
+    Lee n bytes consecutivos desde un registro base (burst read).
+
+  combinar(hi, lo)
+    Combina dos bytes big-endian en un int16_t con signo.
+
+  setup()
+    Verifica WHO_AM_I, despierta el sensor, configura escala y filtro.
+    Si el sensor no responde, imprime error y detiene la ejecución.
+
+  loop()
+    Cada 100 ms lee 6 bytes de acelerómetro y 6 bytes de giroscopio,
+    divide por el factor de escala y los imprime en formato tabla.
+
+SALIDA SERIAL (ejemplo)
+    Ax(g)    Ay(g)    Az(g)   |   Gx(°/s)  Gy(°/s)  Gz(°/s)
+    -------------------------------------------------------
+    0.0023   0.0105   1.0012  |     0.152    -0.031     0.008
+
+NOTAS
+  - GPIO 21 es compartido con EN_IZQ en otros sketches. No conectar
+    el motor y el MPU9250 al mismo tiempo sin cambiar uno de los pines.
+  - El magnetómetro del MPU9250 (AK8963) no se lee en este código.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+7. Control_PID_Serial.ino
+================================================================================
+
+PROPÓSITO
+  Controlador PI posicional completo para robot diferencial. Recibe comandos
+  por Serial desde una computadora (o Raspberry Pi) y ejecuta un lazo de
+  control cerrado usando los encoders de cada rueda. Es la versión base
+  de la que derivan las versiones WiFi.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Ninguna externa.
+
+PINES USADOS
+  GPIO 25  — SV_SIGNAL_IZQ (DAC)
+  GPIO 26  — SV_SIGNAL_DER (DAC)
+  GPIO 14  — FR_IZQ
+  GPIO 27  — FR_DER
+  GPIO 21  — EN_IZQ
+  GPIO 33  — EN_DER
+  GPIO 32  — ENC_IZQ (interrupción RISING)
+  GPIO 34  — ENC_DER (interrupción RISING)
+
+PARÁMETROS DEL CONTROLADOR
+  kp = 6.0       Ganancia proporcional
+  ki = 3.0       Ganancia integral
+  SAMPLE_MS = 200        Periodo de muestreo (ms)
+  PULSOS_MAX = 22        Pulsos máximos por periodo (velocidad máxima)
+  INTEGRAL_MAX = 85.0    Anti-windup: 255/ki
+  REF_MIN_GIRO = 12      Referencia mínima en giros para evitar alarma del driver
+  DAC_MIN_ARRANQUE = 60  Offset de zona muerta (feedforward)
+
+CINEMÁTICA
+  R_RUEDA = 0.1397 m   Radio de rueda
+  L_BASE  = 1.12 m     Separación entre ruedas
+  VMAX    = 4.0 m/s    Velocidad lineal máxima
+  WMAX    = 2.0 rad/s  Velocidad angular máxima
+
+STRUCTS
+  MotorState
+    ref       — referencia en pulsos/periodo
+    medida    — pulsos leídos (con signo según dirección)
+    error     — ref - medida
+    integral  — acumulador de error
+    u         — esfuerzo de control (sin signo)
+    dac       — valor final escrito en DAC (0-255)
+
+  TeleData
+    Snapshot de telemetría del último ciclo para debug.
+
+FUNCIONES PRINCIPALES
+  cinematica(vx, vy, ref_izq, ref_der)
+    Convierte velocidades normalizadas [−1,1] en referencias de pulsos
+    para cada rueda usando el modelo de robot diferencial.
+    Aplica FIX 1: si la referencia es distinta de 0 pero menor que
+    REF_MIN_GIRO, la eleva al mínimo para evitar que el driver se alarme.
+
+  aplicarMotores(ri, rd)
+    Cambia pines FR según signo de referencia. Si cambia dirección,
+    resetea integral y DAC a 0 antes de invertir (evita pico de corriente).
+
+  enableMotores(on)
+    true  → pone EN como OUTPUT+LOW (activa driver)
+    false → pone EN como INPUT (alta impedancia, driver se apaga),
+            resetea integrales y pone DAC=0.
+
+  stepPI(m, T)
+    Ejecuta un paso de control PI para un motor:
+      error     = ref - medida
+      integral += error × T              (acumula)
+      integral  = clamp(−85, +85)        (FIX 2: anti-windup)
+      u_raw     = kp×error + ki×integral (FIX 3: con signo correcto)
+      u         = |u_raw|                (dirección → pin FR)
+      dac       = u + DAC_MIN_ARRANQUE   (FIX 4: feedforward zona muerta)
+
+  procesarComando(cmd)
+    Parsea el String del Serial:
+      "ENABLE,true"  → activa motores
+      "ENABLE,false" → desactiva
+      "MOVE,vx,vy"   → llama cinematica() y aplicarMotores()
+
+  loop()
+    Cada SAMPLE_MS:
+      1. Lee encoders de forma atómica (noInterrupts)
+      2. Asigna signo lógico según dirección actual
+      3. Ejecuta stepPI para cada motor
+      4. Escribe DAC
+      5. Envía telemetría por Serial:
+         "TEL,pi,pd,ri,rd,ei,ed,daci,dacd"
+
+PROTOCOLO SERIAL
+  → ENABLE,true          (activar motores)
+  → ENABLE,false         (desactivar)
+  → MOVE,0.5,0.0         (ir recto a mitad de velocidad)
+  → MOVE,0.5,0.3         (avanzar y girar a la derecha)
+  ← TEL,18,17,22,22,4.0,5.0,124,134   (telemetría cada 200 ms)
+
+RELACIÓN CON OTROS ARCHIVOS
+  - grandroot_bridge.py (RPi) se conecta vía USB-Serial a este firmware.
+  - robot_vision_serial.py también usa este mismo protocolo.
+  - Control_PID_WIFI.ino es la versión equivalente con comunicación WiFi.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+8. Control_PID_WIFI.ino
+================================================================================
+
+PROPÓSITO
+  Versión WiFi del controlador PI. Crea un Access Point propio en el ESP32,
+  sirve una página web embebida y se comunica en tiempo real con el navegador
+  (o cualquier cliente) mediante WebSocket. La lógica de control es idéntica
+  a Control_PID_Serial.ino.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS NECESARIAS (instalar en Arduino IDE Library Manager)
+  ESPAsyncWebServer  (by lacamera / me-no-dev)
+  AsyncTCP           (by dvarrel / me-no-dev)
+  WiFi.h             (incluida en ESP32 board package)
+
+ARCHIVOS ADICIONALES
+  index_html.h  — contiene la página web embebida como cadena C
+
+RED WIFI CREADA
+  SSID     : ESP32-Robot
+  Password : robot1234
+  IP fija  : 192.168.4.1
+  WebSocket: ws://192.168.4.1/ws
+
+PINES USADOS
+  Idénticos a Control_PID_Serial.ino.
+
+PARÁMETROS DEL CONTROLADOR
+  Idénticos a Control_PID_Serial.ino (kp=6, ki=3, SAMPLE_MS=200, etc.)
+  Diferencia en REF_MIN_GIRO: valor 10 (vs 12 en la versión Serial).
+
+FUNCIONES NUEVAS RESPECTO A LA VERSIÓN SERIAL
+  onWsEvent(server, client, type, arg, data, len)
+    Callback del WebSocket. Maneja:
+      WS_EVT_CONNECT    → log de conexión
+      WS_EVT_DISCONNECT → si no quedan clientes, desactiva motores
+      WS_EVT_DATA       → parsea mensaje de texto y llama procesarComando()
+      WS_EVT_ERROR      → log de error
+
+  setup() (adiciones WiFi)
+    WiFi.softAP() — crea el Access Point
+    ws.onEvent()  — registra callback WebSocket
+    server.addHandler(&ws)
+    server.on("/") — sirve INDEX_HTML desde index_html.h
+    server.begin()
+
+  loop() (diferencias)
+    ws.cleanupClients() — limpia clientes desconectados
+    Telemetría enviada con ws.textAll() en lugar de Serial.print()
+
+PROTOCOLO WEBSOCKET
+  Idéntico al protocolo Serial:
+  → ENABLE,true / ENABLE,false
+  → MOVE,vx,vy
+  ← TEL,pi,pd,ri,rd,ei,ed,daci,dacd   (cada 200 ms)
+
+SEGURIDAD
+  Si todos los clientes se desconectan, los motores se apagan
+  automáticamente en onWsEvent (WS_EVT_DISCONNECT).
+
+RELACIÓN CON OTROS ARCHIVOS
+  index_html.h — interfaz gráfica que corre en el navegador del operador.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+9. Prueba_HTML_WIFI.ino
+================================================================================
+
+PROPÓSITO
+  Prueba de servidor web embebido con control de motores vía HTTP (polling),
+  sin WebSocket. El celular u otra PC se conecta al WiFi del ESP32 y accede
+  a http://192.168.4.1 para controlar el robot.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  WiFi.h     (incluida)
+  WebServer.h (incluida, distinta de ESPAsyncWebServer)
+  web_page.h  (archivo .h con el HTML embebido)
+
+RED WIFI CREADA
+  SSID     : GrandRoot
+  Password : robot1234
+  IP fija  : 192.168.4.1
+
+PINES USADOS
+  Idénticos a los demás sketches de motor (GPIO 25,26,14,27,21,33,32,34).
+
+PARÁMETROS
+  PULSOS_MAX = 98         (diferente a versiones PID — sin control cerrado)
+  SAMPLE_MS  = 1000 ms
+  R_RUEDA    = 0.127 m   (radio distinto al del PID — modelo más antiguo)
+  L_BASE     = 1.12 m
+
+DIFERENCIA PRINCIPAL CON Control_PID_WIFI.ino
+  - No hay control PI cerrado. La referencia se mapea directamente a DAC
+    con la función map(abs(ri), 0, PULSOS_MAX, 0, 255).
+  - Comunicación por HTTP polling (no WebSocket).
+  - Usa WebServer.h en lugar de ESPAsyncWebServer.
+
+RUTAS HTTP
+  GET  /             → sirve la página HTML de control
+  POST /api/mover    → recibe JSON {"vx":0.5,"vy":0.0}, aplica cinemática
+  GET  /api/tele     → devuelve JSON con pulsos y DAC actuales
+  POST /api/enable   → activa/desactiva motores
+
+FUNCIONES PRINCIPALES
+  cinematica(vx, vy, ref_izq, ref_der)
+    Misma lógica diferencial que los demás sketches.
+
+  aplicarMotores(ri, rd)
+    Sin PI: usa map() directo de referencia a DAC.
+    Apaga DAC antes de cambiar dirección para proteger el driver.
+
+  loop()
+    server.handleClient() — atiende peticiones HTTP
+    Cada 1 s actualiza la telemetría last_tele con pulsos del encoder.
+
+ARCHIVO COMPLEMENTARIO
+  web_page.h — contiene el string HTML con la interfaz gráfica (joystick).
+
+--------------------------------------------------------------------------------
+
+================================================================================
+10. Carrito_Vision.ino
+================================================================================
+
+PROPÓSITO
+  Firmware para el carrito de prueba a escala (hardware diferente: puente H
+  L298N en lugar de drivers WS55-220). Recibe comandos MOVE del script
+  robot_vision_serial.py y controla los motores sin encoders usando PWM.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Ninguna externa (usa ledcAttach de la API ESP32 Arduino Core 3.x).
+
+PINES USADOS
+  GPIO 26  — EN_A    (PWM motor izquierdo — canal LEDC)
+  GPIO 27  — IN1     (dirección motor izquierdo)
+  GPIO 18  — IN2
+  GPIO 19  — IN3     (dirección motor derecho)
+  GPIO 14  — IN4
+  GPIO 25  — EN_B    (PWM motor derecho — canal LEDC)
+
+HARDWARE CONECTADO
+  Puente H L298N (diferente a los otros sketches que usan WS55-220).
+
+PARÁMETROS
+  PWM_FREQ       = 1000 Hz
+  PWM_BITS       = 8        (valores 0-255)
+  VELOCIDAD_BASE = 180      (duty cycle fijo cuando avanza)
+  VX_UMBRAL      = 0.05     (mínimo vx para moverse)
+  WATCHDOG_MS    = 600      (ms sin comando MOVE → detener motores)
+
+FUNCIONES PRINCIPALES
+  detener()
+    Escribe 0 en ambos canales LEDC y baja todos los pines IN.
+
+  setMotorIzq(vel, adelante) / setMotorDer(vel, adelante)
+    Configura pines IN1/IN2 o IN3/IN4 según dirección y aplica PWM.
+
+  aplicarMovimiento(vx, vy)
+    Sin control cerrado: velocidad fija VELOCIDAD_BASE.
+    Giro: reduce el motor del lado hacia el que gira.
+      vy > 0.1  → girar derecha: vel_der = vel × (1 − |vy|)
+      vy < −0.1 → girar izquierda: vel_izq = vel × (1 − |vy|)
+
+  procesarComando(cmd)
+    Mismo protocolo que Control_PID_Serial:
+      ENABLE,true/false → activa/desactiva
+      MOVE,vx,vy        → aplica movimiento + actualiza watchdog
+    Responde con eco TEL para mantener compatibilidad con robot_vision_serial.py.
+
+  loop()
+    Lee Serial y verifica watchdog (si pasan >600 ms sin MOVE, detiene motores).
+
+PROTOCOLO SERIAL
+  Idéntico a Control_PID_Serial.ino.
+
+RELACIÓN CON OTROS ARCHIVOS
+  robot_vision_serial.py — script Python que alimenta los comandos MOVE
+  basándose en la detección del modelo U-Net.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+11. robot_vision_serial.py
+================================================================================
+
+PROPÓSITO
+  Script Python que combina visión por computadora con control de motores.
+  Captura frames de una cámara, los procesa con un modelo U-Net entrenado
+  (modelo_final.h5), detecta la dirección del surco o camino, y envía
+  comandos MOVE al ESP32 por Serial.
+
+PLATAFORMA
+  PC o Laptop con Python 3.x
+
+LIBRERÍAS
+  cv2          (OpenCV — captura de cámara y visualización)
+  numpy
+  tensorflow   (carga y ejecución del modelo .h5)
+  serial       (pyserial — comunicación con ESP32)
+  threading    (lectura Serial en hilo separado)
+  time, sys, os
+
+ARCHIVOS DE ENTRADA
+  modelo_final.h5   — modelo U-Net entrenado para segmentación de camino
+
+PARÁMETROS CONFIGURABLES
+  REF_PULSOS   = 10      Velocidad de referencia (pulsos/muestra, rango 4-22)
+  TURN_FACTOR  = 0.5     Fracción de vx aplicada como vy al girar
+  ANGLE_UMBRAL = 3.0°    Ángulo mínimo para considerar desviación
+  CONF_MIN_ACCION = 0.30 Confianza mínima del modelo para actuar
+  SERIAL_PORT  = None    None = autodetectar ESP32; o 'COM3', '/dev/ttyUSB0'
+  SERIAL_BAUD  = 115200
+  CAMERA_INDEX = 1       0=cámara integrada, 1=USB externa
+  IMG_SIZE     = (128, 128)
+
+FUNCIONES PERSONALIZADAS DEL MODELO
+  dice_coef(y_true, y_pred)
+    Métrica Dice para segmentación. Necesaria para cargar el .h5
+    correctamente (el modelo fue entrenado con esta métrica).
+
+  dice_loss(y_true, y_pred)
+    Función de pérdida complementaria.
+
+FLUJO DE PROCESAMIENTO
+  1. Captura frame de cámara
+  2. Redimensiona a 128×128 y normaliza (0-1)
+  3. Inferencia U-Net → máscara binaria del camino
+  4. Calcula centroide de la máscara
+  5. Determina ángulo de desviación respecto al centro del frame
+  6. Si confianza < CONF_MIN_ACCION → MOVE,0,0 (detener)
+  7. Si ángulo < ANGLE_UMBRAL → ir recto: MOVE,vx,0
+  8. Si ángulo ≥ ANGLE_UMBRAL → girar: MOVE,vx,±vy
+  9. Envía comando por Serial al ESP32
+  10. Muestra overlay visual en pantalla
+
+CONTROLES DE TECLADO
+  Q / ESC  → salir (apaga motores)
+  SPACE    → pausar/reanudar visión
+  E        → habilitar/deshabilitar motores (toggle)
+  S        → guardar screenshot
+  + / −    → subir/bajar REF_PULSOS en tiempo real
+
+HILO DE LECTURA SERIAL
+  Corre en segundo plano leyendo la telemetría TEL del ESP32
+  y mostrándola en consola.
+
+RELACIÓN CON OTROS ARCHIVOS
+  Carrito_Vision.ino  — firmware del ESP32 que recibe los comandos
+  modelo_final.h5     — modelo de segmentación (archivo binario, ~23 MB)
+
+--------------------------------------------------------------------------------
+
+================================================================================
+12. Pruebas_PI_ESP32 / files / leds.ino
+================================================================================
+
+PROPÓSITO
+  Prueba mínima de comunicación entre ESP32 y Raspberry Pi. El ESP32 recibe
+  comandos de un carácter por Serial y enciende un LED de color correspondiente.
+  Sirve para verificar que el puerto Serial funciona antes de cargar firmware
+  más complejo.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Ninguna.
+
+PINES USADOS
+  GPIO 2  — LED rojo
+  GPIO 4  — LED azul
+
+COMANDOS SERIAL (a 9600 baud)
+  'R' → enciende LED rojo, apaga azul
+  'B' → enciende LED azul, apaga rojo
+
+SALIDA SERIAL
+  "[ESP32] Listo"          (al encender)
+  "[ESP32] LED Rojo ON"    (al recibir 'R')
+  "[ESP32] LED Azul ON"    (al recibir 'B')
+
+RELACIÓN CON OTROS ARCHIVOS
+  server.py — servidor Flask en la RPi que envía los comandos 'R' y 'B'
+              al ESP32 a través del puerto Serial.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+13. Pruebas_PI_ESP32 / files / server.py
+================================================================================
+
+PROPÓSITO
+  Servidor web Flask que corre en la Raspberry Pi y sirve como intermediario
+  entre un navegador web y el ESP32. Es la prueba de concepto del puente
+  HTTP ↔ Serial que luego se amplió en grandroot_bridge.py.
+
+PLATAFORMA
+  Raspberry Pi (Python 3.x)
+
+LIBRERÍAS
+  flask        (servidor web)
+  serial       (pyserial — comunicación con ESP32)
+  time
+
+CONFIGURACIÓN
+  SERIAL_PORT = '/dev/ttyUSB0'   (ajustar si es diferente)
+  BAUD_RATE   = 9600
+
+RUTAS HTTP
+  GET  /        → sirve leds.html (interfaz de control)
+  POST /led     → recibe JSON {"color":"rojo"} o {"color":"azul"},
+                  envía 'R\n' o 'B\n' por Serial al ESP32
+
+MANEJO DE ERRORES
+  Si el puerto Serial no está disponible al arrancar, el servidor
+  sigue funcionando pero /led devuelve error 500.
+
+ARRANQUE
+  python3 server.py
+  Escucha en 0.0.0.0:8080 (accesible desde cualquier dispositivo en la red).
+
+RELACIÓN CON OTROS ARCHIVOS
+  leds.ino  — firmware del ESP32 que recibe los comandos
+  leds.html — página HTML servida al navegador
+
+EVOLUCIÓN
+  Este archivo es la versión simplificada. grandroot_bridge.py es su sucesor
+  con soporte para WebSocket, múltiples clientes y protocolo de motores completo.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+14. Control_PID_RBPI / grandroot_bridge.py
+================================================================================
+
+PROPÓSITO
+  Puente bidireccional entre el navegador web y el ESP32. Corre en la
+  Raspberry Pi 5, lee la telemetría del ESP32 por USB-Serial y la reenvía
+  por WebSocket a todos los clientes conectados. También recibe comandos del
+  navegador (ENABLE, MOVE) y los manda al ESP32 por Serial.
+
+PLATAFORMA
+  Raspberry Pi 5 (Python 3.x)
+
+LIBRERÍAS
+  pyserial     (comunicación con ESP32)
+  websockets   (servidor WebSocket asíncrono)
+  asyncio      (I/O asíncrono)
+  http.server  (servidor HTTP simple para servir index.html)
+  threading    (hilo de lectura Serial)
+  argparse     (argumentos de línea de comandos)
+  logging      (logs con timestamp)
+
+ARGUMENTOS DE LÍNEA DE COMANDOS
+  --port      puerto Serial  (default: /dev/ttyUSB0)
+  --baud      baudrate       (default: 115200)
+  --http-port puerto HTTP    (default: 8080)
+  --ws-port   puerto WS      (default: 8765)
+
+ARQUITECTURA
+  Navegador ←── WS:8765 ──→ RPi bridge ←── USB-Serial ──→ ESP32
+  Navegador ←── HTTP:8080 ─→ RPi (sirve index.html)
+
+COMPONENTES INTERNOS
+  State (clase)
+    Contiene: serial_conn, ws_clients, serial_lock, loop.
+    Compartida entre hilos y corutinas.
+
+  serial_write(line)
+    Thread-safe: usa serial_lock para evitar condiciones de carrera al
+    escribir desde múltiples fuentes al mismo tiempo.
+
+  serial_reader_thread()
+    Hilo bloqueante que lee líneas del ESP32. Por cada línea recibida,
+    llama a asyncio.run_coroutine_threadsafe() para hacer broadcast a
+    todos los clientes WebSocket conectados.
+
+  ws_handler(websocket)
+    Corutina asíncrona. Registra el cliente, espera mensajes y los envía
+    al ESP32 por Serial. Al desconectarse, limpia el registro.
+
+  http_server_thread(port)
+    Hilo que sirve index.html vía HTTP simple (SimpleHTTPRequestHandler).
+
+  main()
+    - Abre puerto Serial
+    - Lanza hilo de lectura Serial
+    - Lanza hilo HTTP
+    - Inicia servidor WebSocket con websockets.serve()
+    - Captura SIGINT/SIGTERM para cierre limpio
+
+PROTOCOLO (idéntico al del firmware)
+  → ENABLE,true / ENABLE,false
+  → MOVE,vx,vy
+  ← TEL,pi,pd,ri,rd,ei,ed,daci,dacd
+
+CIERRE LIMPIO
+  Al recibir Ctrl+C, cierra el puerto Serial y termina todos los hilos.
+
+RELACIÓN CON OTROS ARCHIVOS
+  Control_PID_RBPI.ino — firmware del ESP32 que se comunica con este bridge
+  index.html           — interfaz web con joystick y telemetría en tiempo real
+
+ARCHIVOS DE CONFIGURACIÓN (TXT de la misma carpeta)
+  grandroot_01_hotspot.txt    — instrucciones para crear hotspot WiFi en la RPi
+  grandroot_02_systemd.txt    — cómo registrar el bridge como servicio systemd
+  grandroot_03_switch_modos.txt — cómo alternar entre modo hotspot y cliente WiFi
+  grandroot_04_mantenimiento.txt — comandos de diagnóstico y mantenimiento del sistema
+
+--------------------------------------------------------------------------------
+
+================================================================================
+15. DIAGRAMA DE CONEXIONES DE PINES (Resumen General)
+================================================================================
+
+ESP32 — Drivers BLDC WS55-220 (sketches principales)
+  GPIO 25 → SV_SIGNAL_IZQ   DAC de velocidad motor izquierdo
+  GPIO 26 → SV_SIGNAL_DER   DAC de velocidad motor derecho
+  GPIO 14 → FR_IZQ          Dirección motor izq (HIGH=adelante*)
+  GPIO 27 → FR_DER          Dirección motor der (LOW=adelante*)
+  GPIO 21 → EN_IZQ          Enable motor izq (OUTPUT+LOW=activo)
+  GPIO 33 → EN_DER          Enable motor der (OUTPUT+LOW=activo)
+  GPIO 32 → ENC_IZQ         Encoder izquierdo (con pull-up externo 10kΩ)
+  GPIO 34 → ENC_DER         Encoder derecho   (con pull-up externo 10kΩ)
+
+  * La inversión en FR_DER (LOW=adelante) es intencional para compensar
+    el montaje espejo de los motores en el chasis.
+
+ESP32 — Puente H L298N (Carrito_Vision)
+  GPIO 26 → EN_A   PWM motor izquierdo
+  GPIO 27 → IN1    Dirección motor izquierdo
+  GPIO 18 → IN2
+  GPIO 19 → IN3    Dirección motor derecho
+  GPIO 14 → IN4
+  GPIO 25 → EN_B   PWM motor derecho
+
+ESP32 — MPU9250 (I2C)
+  GPIO 22 → SCL
+  GPIO 21 → SDA   ← CONFLICTO con EN_IZQ en otros sketches
+  3.3 V   → VCC
+  GND     → GND + AD0 (dirección 0x68)
+
+ESP32 — LEDs de prueba (leds.ino)
+  GPIO 2  → LED rojo
+  GPIO 4  → LED azul
+
+Raspberry Pi 5 — ESP32
+  USB-A (RPi) ← USB-B micro/C (ESP32)   puerto /dev/ttyUSB0 a 115200 baud
+
+================================================================================
+16. RELACIÓN ENTRE ARCHIVOS (Qué se conecta con qué)
+================================================================================
+
+SISTEMA COMPLETO CON RASPBERRY PI (producción):
+  index.html (navegador)
+      ↕ WebSocket :8765
+  grandroot_bridge.py  (Raspberry Pi)
+      ↕ USB-Serial 115200
+  Control_PID_RBPI.ino  (ESP32)
+      ↕ DAC/GPIO
+  Drivers WS55-220 → Motores BLDC
+
+SISTEMA AUTÓNOMO POR VISIÓN:
+  modelo_final.h5
+      ↓
+  robot_vision_serial.py  (PC/Laptop)
+      ↕ USB-Serial 115200
+  Carrito_Vision.ino  (ESP32)
+      ↕ PWM/GPIO
+  Puente H L298N → Motores DC
+
+SISTEMA WIFI STANDALONE (sin RPi):
+  Navegador (celular/PC)
+      ↕ WebSocket ws://192.168.4.1/ws
+  Control_PID_WIFI.ino + index_html.h  (ESP32 AP)
+      ↕ DAC/GPIO
+  Drivers WS55-220 → Motores BLDC
+
+SISTEMA WIFI SIMPLE (HTTP polling):
+  Navegador (celular)
+      ↕ HTTP http://192.168.4.1
+  Prueba_HTML_WIFI.ino + web_page.h  (ESP32 AP)
+      ↕ DAC/GPIO
+  Drivers WS55-220 → Motores BLDC
+
+PRUEBA RPi-ESP32 BÁSICA:
+  Navegador → leds.html
+      ↕ HTTP :8080
+  server.py  (Raspberry Pi)
+      ↕ USB-Serial 9600
+  leds.ino  (ESP32)
+      ↕ GPIO 2/4
+  LEDs rojo/azul
+
+PRUEBAS DE CARACTERIZACIÓN (standalone ESP32):
+  Tabla_DAC_UP.ino    → genera curva velocidad vs DAC (ascendente)
+  Tabla_DAC_DOWN.ino  → genera curva velocidad vs DAC (descendente)
+  Pulsos_Max.ino      → mide velocidad máxima a 3.3 V
+  Contador_Pulsos.ino → verifica encoders + comandos básicos
+  Control_Llanta.ino  → prueba manual de dirección y voltaje
+  MPU9250.ino         → verifica sensor IMU
+
+================================================================================
+  Fin de documentación — GrandRoot Pruebas
+  Generado automáticamente con base en el análisis del código fuente
+================================================================================
