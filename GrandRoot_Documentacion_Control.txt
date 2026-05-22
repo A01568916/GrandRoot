@@ -1,0 +1,646 @@
+================================================================================
+  GRANDROOT — DOCUMENTACIÓN DE CÓDIGO (Branch: Control)
+  Proyecto: Carrito autónomo para análisis inteligente del suelo
+  Módulo: Caracterización y comparación de controladores (motor DC derecho)
+================================================================================
+
+ÍNDICE
+------
+  1.  Control_ON_OFF.ino      — Controlador on/off
+  2.  Control_P.ino           — Controlador proporcional
+  3.  Control_PI.ino          — Controlador proporcional-integral
+  4.  Control_PID.ino         — Controlador proporcional-integral-derivativo
+  5.  Control_Unificado.ino   — Los 4 modos en un solo firmware seleccionable
+  6.  gui_web.py              — Dashboard web 
+  7.  gui_control_web.py      — Dashboard web para Control Unificado
+  8.  HARDWARE COMPARTIDO — Pines y conexiones
+  9.  PROTOCOLO SERIAL — Resumen de comunicación
+ 10.  COMPARATIVA DE CONTROLADORES
+ 11.  RELACIÓN CON OTRAS BRANCHES
+
+================================================================================
+1. Control_ON_OFF.ino
+================================================================================
+
+PROPÓSITO
+  Implementa el controlador más simple: ley de control on/off.
+  El actuador tiene solo dos estados: máxima potencia (DAC=255) o apagado
+  (DAC=0), dependiendo de si la velocidad medida está por debajo o por encima
+  de la referencia. Es el punto de partida experimental para comparar con
+  controladores más sofisticados.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Ninguna externa.
+
+PINES USADOS
+  GPIO 26  — SV_SIGNAL_DER  (DAC → señal de velocidad al driver)
+  GPIO 32  — ENC_DER        (encoder, pull-down externo a GND)
+  GPIO 27  — FR_DER         (dirección del motor, fijo en HIGH)
+
+PARÁMETROS
+  PULSOS_MAX = 110   pulsos máximos por periodo de muestreo
+  SAMPLE_MS  = 1000  periodo de muestreo en milisegundos (1 segundo)
+
+VARIABLES GLOBALES
+  pulsosDer    — contador de interrupciones (volatile, protegido)
+  medidaDer    — pulsos leídos en el último periodo
+  referencia   — setpoint recibido por Serial (0–110)
+  errorDer     — referencia − medidaDer
+  esfuerzoDer  — salida al DAC (0 o 255)
+  porcentaje   — error expresado como % de la referencia
+
+LEY DE CONTROL
+  Si medidaDer < referencia → esfuerzoDer = 255  (motor a máxima velocidad)
+  Si medidaDer ≥ referencia → esfuerzoDer = 0    (motor apagado)
+
+  Nota: en el código existe una versión comentada con histéresis
+  (zona muerta de ±20 pulsos) para reducir el chattering. La versión activa
+  es la comparación directa sin histéresis.
+
+FUNCIONES PRINCIPALES
+  contarPulsoDer()  [IRAM_ATTR]
+    ISR que incrementa pulsosDer en cada flanco RISING del encoder.
+
+  setup()
+    Inicializa Serial a 115200, configura pines, registra ISR,
+    coloca DAC en 0 y pone FR_DER en HIGH (dirección fija).
+
+  loop()
+    - Escucha Serial: si llega un float terminado en '\n', lo guarda
+      como nueva referencia (constrained a 0–110).
+    - Cada SAMPLE_MS: lee pulsos de forma atómica, aplica ley On/Off,
+      escribe DAC, calcula porcentaje de error y envía trama Serial.
+
+TRAMA DE SALIDA
+  "pul_der,err_pct,esf_der\n"
+  Ejemplo: "78,22.1,255"  →  78 pulsos medidos, 22.1% error, DAC=255
+
+NOTA SOBRE FR_DER
+  El pin FR_DER está fijo en HIGH. En el driver físico esto produce la
+  dirección real de adelante (hay una negación física en el montaje).
+
+--------------------------------------------------------------------------------
+
+================================================================================
+2. Control_P.ino
+================================================================================
+
+PROPÓSITO
+  Controlador Proporcional puro. El esfuerzo de control es proporcional
+  al error instantáneo. Elimina el comportamiento oscilatorio extremo del
+  On/Off pero introduce error en estado estacionario (offset permanente).
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Ninguna externa.
+
+PINES USADOS
+  Idénticos a Control_ON_OFF.ino (GPIO 26, 32, 27).
+
+PARÁMETROS
+  PULSOS_MAX = 110
+  SAMPLE_MS  = 1000
+  kp         = 1.3    (ganancia proporcional)
+
+LEY DE CONTROL
+  error       = referencia − medidaDer
+  esfuerzoDer = kp × error
+  esfuerzoDer = clamp(esfuerzoDer, 0, 255)
+
+  Con kp=1.3: si el error es 100 pulsos → DAC = 130.
+  El DAC satura a 255 para errores grandes y a 0 para errores negativos
+  (no se permite reversa en esta prueba).
+
+COMPORTAMIENTO ESPERADO
+  - Arranque suave comparado con On/Off.
+  - A medida que la velocidad se acerca a la referencia, el esfuerzo baja.
+  - El motor se estabiliza con un error residual positivo (offset),
+    porque cuando el error es pequeño la señal DAC puede ser insuficiente
+    para vencer la fricción del motor.
+
+DIFERENCIA CON Control_ON_OFF.ino
+  Solo cambia la ley de control en el bloque if de millis():
+    On/Off: esfuerzoDer = (medida < ref) ? 255 : 0
+    P:      esfuerzoDer = kp × error
+
+NOTA DE COMPILACIÓN
+  Hay una variable global sin tipo declarado ('porcentaje = 0') que puede
+  generar un warning en algunos compiladores. En el Control_Unificado.ino
+  está corregida como 'float porcentaje = 0'.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+3. Control_PI.ino
+================================================================================
+
+PROPÓSITO
+  Controlador Proporcional-Integral. Agrega un término integrador que acumula
+  el error a lo largo del tiempo, eliminando el offset en estado estacionario
+  que tiene el controlador P.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Ninguna externa.
+
+PINES USADOS
+  Idénticos a los anteriores (GPIO 26, 32, 27).
+
+PARÁMETROS
+  PULSOS_MAX = 110
+  SAMPLE_MS  = 1000
+  ki         = 0.5   (ganancia integral)
+  ua         = 0.0   (acumulador — u(k−1))
+
+  Nota: no hay kp explícito en este archivo. La ley usa solo ki más el
+  acumulador, lo que equivale a un integrador puro (ki×e + u_anterior).
+
+LEY DE CONTROL (forma de velocidad / recursiva)
+  error       = referencia − medidaDer
+  esfuerzoDer = ki × error + ua
+  ua          = esfuerzoDer           (guardar para el siguiente ciclo)
+  esfuerzoDer = clamp(esfuerzoDer, 0, 255)
+
+  Esta forma recursiva es equivalente a un integrador discreto:
+    u(k) = u(k-1) + ki × e(k)
+  Cada ciclo suma ki×error al valor anterior del esfuerzo.
+
+RIESGO: WIND-UP
+  No hay anti-windup implementado. Si la referencia es alta y el motor no
+  alcanza la velocidad deseada, ua puede crecer indefinidamente (wind-up),
+  causando sobreoscilación al momento de reducir la referencia.
+  Este problema se corrige en Control_Unificado.ino.
+
+COMPORTAMIENTO ESPERADO
+  - El integrador empuja el DAC hacia arriba hasta que el error se anula.
+  - Error en estado estacionario ≈ 0 (teóricamente).
+  - Puede haber sobreimpulso (overshoot) dependiendo del valor de ki.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+4. Control_PID.ino
+================================================================================
+
+PROPÓSITO
+  Controlador Proporcional-Integral-Derivativo. Agrega un término derivativo
+  que anticipa el error futuro basándose en la velocidad de cambio del error,
+  reduciendo el sobreimpulso del PI.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Ninguna externa.
+
+PINES USADOS
+  Idénticos a los anteriores (GPIO 26, 32, 27).
+
+PARÁMETROS
+  PULSOS_MAX  = 110
+  SAMPLE_MS   = 1000
+  kp          = 0.5
+  ki          = kp / 2   = 0.25
+  kd          = ki / 10  = 0.025
+  ua          = 0.0      (acumulador u(k-1))
+  errorant    = 0.0      (error(k-1))
+  errorantant = 0.0      (error(k-2))
+
+LEY DE CONTROL (forma recursiva / posicional incremental)
+  error = referencia − medidaDer
+
+  esfuerzoDer = kp×e(k) + kp×e(k-1) + ki×e(k) + kd×e(k) − 2×kd×e(k-1)
+                + kd×e(k-2) + u(k-1)
+
+  ua          = esfuerzoDer
+  errorantant = errorant
+  errorant    = error
+  esfuerzoDer = clamp(esfuerzoDer, 0, 255)
+
+INTERPRETACIÓN DE LOS TÉRMINOS
+  kp×e(k)                      → acción proporcional al error actual
+  kp×e(k-1)                    → término cruzado PD (suaviza la respuesta)
+  ki×e(k)                      → acción integral (elimina offset)
+  kd×e(k) − 2kd×e(k-1) + kd×e(k-2) → diferencia segunda del error ≈ derivada
+  + u(k-1)                     → forma recursiva (acumula todo)
+
+RIESGO: WIND-UP
+  Al igual que el PI, no hay anti-windup explícito (solo el clamp 0–255).
+  Corregido en Control_Unificado.ino.
+
+COMPORTAMIENTO ESPERADO
+  - Menor sobreimpulso que el PI gracias al término derivativo.
+  - Más sensible al ruido de encoder que el P o PI (el término kd amplifica
+    cambios bruscos en el error).
+  - Las ganancias kp=0.5, ki=0.25, kd=0.025 son valores conservadores
+    que priorizan estabilidad sobre velocidad de respuesta.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+5. Control_Unificado.ino
+================================================================================
+
+PROPÓSITO
+  Consolida los cuatro controladores anteriores en un único firmware.
+  Permite cambiar entre On/Off, P, PI y PID en tiempo real desde el dashboard
+  web (gui_control_web.py) sin necesidad de reprogramar el ESP32.
+  Incluye las correcciones de bugs identificadas en los firmwares individuales.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Ninguna externa.
+
+PINES USADOS
+  Idénticos a los anteriores (GPIO 26, 32, 27).
+
+PARÁMETROS Y GANANCIAS
+  PULSOS_MAX  = 110
+  SAMPLE_MS   = 1000
+
+  Modo P:
+    KP_P    = 1.3
+
+  Modo PI:
+    KP_PI   = 1.3
+    KI_PI   = 0.5
+
+  Modo PID:
+    KP_PID  = 0.5
+    KI_PID  = KP_PID / 2  = 0.25
+    KD_PID  = KI_PID / 10 = 0.025
+
+VARIABLES DE ESTADO DEL CONTROLADOR
+  ua          — acumulador PI / PID (u(k-1))
+  errorant    — error del ciclo anterior  (para PID)
+  errorantant — error de dos ciclos atrás (para PID)
+  modoActivo  — modo actual confirmado y ejecutado (0–3)
+  modoPendiente — modo solicitado por el GUI, aún pendiente de aplicar
+
+PROTOCOLO SERIAL (MEJORADO)
+  Recibe: "ref,modo\n"   →  ref = pulsos (0–110), modo = 0|1|2|3
+  Recibe: "ref\n"        →  compatibilidad con firmwares anteriores
+  Recibe: "R\n"          →  reset forzado: DAC a 0 + limpiar integradores
+  Envía:  "pul_der,err_pct,esf_der,modo\n"
+          → el campo 'modo' confirma al GUI qué modo está activo
+
+FUNCIONES PRINCIPALES
+  resetControlador()
+    Limpia ua, errorant, errorantant, errorDer, esfuerzoDer y escribe
+    DAC=0. Se llama SIEMPRE antes de activar un modo nuevo para evitar
+    wind-up o transitorios al cambiar.
+
+  setup()
+    Configura pines, registra ISR, inicializa DAC=0.
+
+  loop()
+    Paso 1 — Leer Serial:
+      Parsea "ref,modo\n". Si solo hay un campo, asume ref y mantiene modo.
+      "R\n" dispara resetControlador() inmediato.
+
+    Paso 2 — Cambio de modo seguro:
+      Solo aplica modoPendiente si referencia==0 Y esfuerzoDer==0
+      (motor detenido). Si no se cumple, el cambio queda pendiente y el GUI
+      debe reenviar la petición en el siguiente ciclo.
+
+    Paso 3 — Ciclo de control (cada SAMPLE_MS):
+      - Lee encoder atómicamente
+      - Calcula error
+      - switch(modoActivo): ejecuta la ley correspondiente
+      - Saturación: clamp(0, 255)
+      - Anti wind-up: también clamp(ua, 0, 255)
+      - dacWrite()
+      - Envía trama con modo confirmado
+
+CORRECCIONES RESPECTO A LOS FIRMWARES INDIVIDUALES
+  1. Anti wind-up para PI y PID:
+       if (ua > 255) ua = 255;
+       if (ua < 0)   ua = 0;
+     Evita que el integrador se dispare cuando la salida está saturada.
+
+  2. Cambio de modo seguro:
+     Los firmwares individuales no tenían forma de cambiar el controlador
+     sin reiniciar el ESP32. Aquí el cambio solo ocurre cuando el motor
+     está completamente detenido (ref=0 y DAC=0).
+
+  3. Comando de reset "R\n":
+     Permite al GUI forzar el motor a 0 en cualquier momento sin esperar
+     el próximo ciclo de SAMPLE_MS.
+
+  4. Trama ampliada con campo 'modo':
+     El GUI puede confirmar qué modo está activo en el ESP32,
+     evitando inconsistencias si el cambio no fue aceptado.
+
+  5. Variables correctamente tipadas:
+     'float porcentaje = 0' (corrige el error de tipo en Control_P.ino).
+
+MODOS (switch)
+  case 0: On/Off
+    if (medida < ref) esfuerzo = 255; else esfuerzo = 0;
+
+  case 1: P
+    esfuerzo = KP_P × error;
+
+  case 2: PI (forma recursiva)
+    esfuerzo = KP_PI × error + KI_PI × error + ua;
+    ua = esfuerzo;
+
+  case 3: PID (forma recursiva posicional)
+    esfuerzo = KP_PID×e(k) + KP_PID×e(k-1) + KI_PID×e(k)
+               + KD_PID×e(k) − 2×KD_PID×e(k-1) + KD_PID×e(k-2) + ua;
+    ua = esfuerzo; errorantant = errorant; errorant = error;
+
+--------------------------------------------------------------------------------
+
+================================================================================
+6. gui_web.py
+================================================================================
+
+PROPÓSITO
+  Dashboard web compatible con todos los firmwares de controlador individual:
+  Control_ON_OFF.ino, Control_P.ino, Control_PI.ino y Control_PID.ino.
+  Corre en la PC, abre automáticamente el navegador en http://localhost:5000
+  y muestra en tiempo real los datos del ESP32.
+
+PLATAFORMA
+  PC con Python 3.x
+
+LIBRERÍAS
+  flask        (servidor web + SSE)
+  pyserial     (comunicación con ESP32)
+  threading    (lectura Serial en hilo separado)
+  queue        (buffer para eventos SSE)
+  webbrowser   (abre el navegador automáticamente al iniciar)
+
+ARRANQUE
+  pip install flask pyserial
+  python gui_web.py
+  → Abre automáticamente http://127.0.0.1:5000
+
+ARQUITECTURA
+  ESP32 (Serial 115200)
+      ↕
+  leer_serial()  [hilo daemon]
+      ↓
+  Queue (por cliente SSE)
+      ↓
+  /stream  [Server-Sent Events]
+      ↓
+  Navegador (Chart.js en tiempo real)
+
+RUTAS HTTP
+  GET  /            → sirve el HTML embebido (dashboard completo)
+  GET  /api/ports   → devuelve lista de puertos COM disponibles como JSON
+  POST /api/connect → { puerto: "COM3", conectar: true/false }
+                      Abre o cierra la conexión Serial
+  POST /api/send    → { ref: 50.0 }
+                      Escribe "50.0\n" al ESP32
+  GET  /stream      → Server-Sent Events (SSE) — stream continuo de datos
+
+FUNCIONES PYTHON
+  leer_serial()  [hilo]
+    Lee líneas del ESP32, parsea "pul_der,err_pct,esf_der",
+    crea un dict y lo distribuye a todas las colas SSE activas.
+    Si no hay conexión, espera 50 ms y reintenta.
+
+  api_ports()
+    Llama serial.tools.list_ports.comports() y devuelve la lista de
+    puertos disponibles.
+
+  api_connect()
+    Abre serial.Serial(puerto, 115200) o cierra la conexión activa.
+    Thread-safe con conn_lock.
+
+  api_send()
+    Valida el valor de referencia (0–110) y escribe "{ref}\n" al Serial.
+
+  stream()
+    Generador de SSE. Registra una Queue en la lista de clientes,
+    hace yield de cada dato como "data: {...}\n\n". Envía keepalive
+    cada 4 segundos si no hay datos.
+
+INTERFAZ WEB (HTML embebido)
+  Tecnologías: Bootstrap 5.3, Bootstrap Icons, Chart.js 4.4
+  Tema: oscuro (dark theme estilo GitHub)
+
+  Componentes:
+  - Header con nombre, badge de estado (rojo=desconectado, verde=conectado)
+  - Panel de control:
+      Selector de puerto COM (autodetectado)
+      Botón Conectar/Desconectar
+      Campo de referencia (0–110 pulsos)
+      Botón Enviar
+  - 3 tarjetas de métricas:
+      Pulsos Der — pulsos medidos en el último segundo
+      Error Der  — % de error respecto a la referencia
+      DAC Der    — valor actual del DAC (0–255)
+  - 3 gráficas en tiempo real (Chart.js, buffer de 150 muestras):
+      Referencia vs Pulsos medidos (línea roja punteada = setpoint)
+      Error (%)
+      Esfuerzo (DAC)
+
+COMUNICACIÓN SSE → GRÁFICAS
+  EventSource('/stream') escucha el stream.
+  Cada mensaje actualiza las 3 tarjetas y agrega un punto a cada gráfica.
+  La gráfica mantiene las últimas 150 muestras (150 segundos con SAMPLE_MS=1000).
+
+NOTA
+  Este GUI funciona con cualquiera de los cuatro firmwares individuales
+  (Control_ON_OFF, Control_P, Control_PI, Control_PID) ya que todos envían
+  tramas de 3 campos con el mismo formato. Para Control_Unificado.ino,
+  que envía 4 campos y permite cambiar de modo en caliente, usar gui_control_web.py.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+7. gui_control_web.py
+================================================================================
+
+PROPÓSITO
+  Dashboard web completo para Control_Unificado.ino. Además del monitoreo
+  en tiempo real, permite seleccionar el modo de control (On/Off / P / PI / PID)
+  y tiene lógica de seguridad para evitar cambios de modo con el motor en marcha.
+
+PLATAFORMA
+  PC con Python 3.x
+
+LIBRERÍAS
+  Idénticas a gui_web.py (flask, pyserial, threading, queue, webbrowser).
+
+DIFERENCIAS RESPECTO A gui_web.py
+  1. Protocolo de envío ampliado:
+       api_send() envía "ref,modo\n" en lugar de solo "ref\n"
+  
+  2. Nueva ruta POST /api/reset:
+       Envía "R\n" al ESP32 → fuerza DAC=0 + resetea integradores
+
+  3. Lectura de trama de 4 campos:
+       "pul_der,err_pct,esf_der,modo\n"
+       Actualiza modo_activo con el campo confirmado por el ESP32.
+       También acepta tramas de 3 campos para compatibilidad.
+
+  4. Campo cambio_ok en el evento SSE:
+       True  cuando referencia==0 y esf_der==0 (motor detenido)
+       False en cualquier otro caso
+       El navegador usa esto para habilitar/deshabilitar el selector de modo.
+
+  5. 4ta tarjeta de métrica:
+       "Modo Confirmado" — muestra el modo que confirmó el ESP32.
+
+  6. Selector de modo con aviso de seguridad:
+       <select id="selModo"> con opciones On/Off, P, PI, PID
+       Se deshabilita automáticamente cuando cambio_ok=False.
+       Muestra aviso amarillo: "Lleva la referencia a 0 y espera que
+       el motor se detenga antes de cambiar el modo."
+
+  7. Botón Reset (rojo):
+       Llama /api/reset → envía "R\n" al ESP32
+       Deshabilitado si la referencia es mayor que 0 (sería incoherente).
+
+RUTAS HTTP (adiciones respecto a gui_web.py)
+  POST /api/reset  → envía "R\n" al ESP32
+
+SEGURIDAD DE CAMBIO DE MODO
+  El GUI y el ESP32 implementan una barrera de seguridad de dos capas:
+  
+  Capa 1 (Python/navegador):
+    El selector se deshabilita visualmente cuando cambio_ok=False.
+    Muestra aviso al usuario.
+  
+  Capa 2 (ESP32 — Control_Unificado.ino):
+    Aunque el GUI envíe "ref,modo\n", el ESP solo acepta el cambio de modo
+    si referencia==0 Y esfuerzoDer==0.
+    Si no se cumple, el ESP ignora el nuevo modo y sigue con el actual.
+    El campo 'modo' en la trama de salida confirma qué modo está activo.
+
+INTERFAZ WEB (HTML embebido)
+  Igual que gui_web.py con los siguientes elementos adicionales:
+  - Badge "modoLabel" en el header: muestra el modo activo (On/Off / P / PI / PID)
+  - Selector de tipo de control
+  - Aviso amarillo de seguridad (visible/oculto)
+  - Botón Reset (rojo, con icono de círculo con barra)
+  - 4ta tarjeta "Modo Confirmado"
+  - Toast con 3 estilos: ok (verde), warn (amarillo), error (rojo)
+
+--------------------------------------------------------------------------------
+
+================================================================================
+8. HARDWARE COMPARTIDO — Pines y conexiones
+================================================================================
+
+Todos los archivos de esta branch controlan únicamente el MOTOR DERECHO.
+(Las pruebas de esta branch son unitarias — solo una rueda — antes de
+integrar el control diferencial completo de la branch Pruebas.)
+
+ESP32 → Driver BLDC WS55-220 (motor derecho)
+  GPIO 26  — SV_SIGNAL_DER   DAC (0–3.3 V) → señal de velocidad analógica
+  GPIO 27  — FR_DER          Dirección (fijo en HIGH para adelante)
+
+ESP32 ← Encoder (motor derecho)
+  GPIO 32  — ENC_DER         Señal encoder, flanco RISING
+             pull-down externo a GND (NO usar INPUT_PULLUP en GPIO 32)
+
+Alimentación del driver:
+  El driver WS55-220 necesita su propia fuente de alimentación (24–48 V DC).
+  El ESP32 y el driver comparten GND.
+
+NOTA SOBRE EL PIN FR_DER
+  En esta branch FR_DER siempre es HIGH. La negación física en el driver
+  hace que HIGH corresponda a "adelante" para este motor.
+  En las branches Pruebas y Navegación, FR_DER=LOW es adelante (ver
+  diferencia en cómo están cableados los dos drivers).
+
+--------------------------------------------------------------------------------
+
+================================================================================
+9. PROTOCOLO SERIAL — Resumen de comunicación
+================================================================================
+
+Velocidad: 115200 baud, timeout: 50 ms
+
+  Firmwares individuales (Control_ON_OFF, P, PI, PID):
+    PC → ESP32 :  "ref\n"                  (float, ej: "75\n")
+    ESP32 → PC :  "pul_der,err_pct,esf_der\n"
+                  Ejemplo: "72,4.2,255"
+
+  Control_Unificado.ino:
+    PC → ESP32 :  "ref,modo\n"             (ej: "75,2\n" = 75 pulsos, modo PI)
+    PC → ESP32 :  "ref\n"                  (solo referencia, modo sin cambio)
+    PC → ESP32 :  "R\n"                    (reset forzado DAC=0)
+    ESP32 → PC :  "pul_der,err_pct,esf_der,modo\n"
+                  Ejemplo: "72,4.2,120,2"  (72 pulsos, 4.2% error, DAC=120, PI)
+
+  Campos de la trama de salida:
+    pul_der   — pulsos del encoder en el último SAMPLE_MS
+    err_pct   — error como porcentaje de la referencia (puede ser negativo)
+    esf_der   — valor del DAC aplicado al driver (0–255)
+    modo      — (solo Unificado) modo activo confirmado (0=On/Off, 1=P, 2=PI, 3=PID)
+
+--------------------------------------------------------------------------------
+
+================================================================================
+10. COMPARATIVA DE CONTROLADORES
+================================================================================
+
+  Modo        Ganancia(s)         Offset SS    Sobreimpulso  Ruido
+  ──────────  ──────────────────  ───────────  ────────────  ──────
+  On/Off      —                   Sí (alta)    Alto (chatter) Bajo
+  P           kp=1.3              Sí (bajo)    Moderado       Bajo
+  PI          ki=0.5              No (≈0)      Puede haber    Bajo
+  PID         kp=0.5 ki=0.25      No (≈0)      Bajo           Medio
+              kd=0.025
+
+  SS = estado estacionario
+  Los valores de ganancia están ajustados para SAMPLE_MS=1000 ms y
+  PULSOS_MAX=110. Cambiar el periodo requiere resintonizar las ganancias.
+
+LIMITACIONES CONOCIDAS
+  - Control_PI.ino: no tiene término kp explícito, solo integrador puro.
+    En la práctica esto puede causar respuesta lenta si ki es pequeño.
+  - Control_PI.ino y Control_PID.ino: sin anti-windup → posible sobreimpulso
+    grande si la referencia se cambia bruscamente.
+  - Control_Unificado.ino: corrige el anti-windup, pero la ley PI usa
+    kp+ki×e(k)+ua, lo que suma efectivamente kp+ki en el primer ciclo.
+    Revisar si se desea separar los términos P e I.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+11. RELACIÓN CON OTRAS BRANCHES
+================================================================================
+
+Branch Control (este módulo) → Branch Pruebas
+  Los controladores de esta branch operan sobre un solo motor (derecho)
+  y son la base de caracterización. Los resultados (ganancias óptimas,
+  comportamiento real) se trasladan a:
+    Control_PID_Serial.ino  (branch Pruebas) — control diferencial completo
+    Control_PID_WIFI.ino    (branch Pruebas) — versión WiFi del mismo
+
+  Diferencias clave entre esta branch y la de Pruebas:
+    Branch Control : un motor, SAMPLE_MS=1000 ms, para experimentos
+    Branch Pruebas : dos motores, SAMPLE_MS=200 ms, para operación real
+
+Branch Control ↔ Dashboard web
+  gui_web.py           → Control_ON_OFF.ino (y P, PI, PID individuales)
+  gui_control_web.py   → Control_Unificado.ino
+
+Flujo de desarrollo recomendado:
+  1. Caracterizar motor con Tabla_DAC_UP/DOWN (branch Pruebas)
+  2. Ajustar ganancias con Control_P/PI/PID.ino (esta branch)
+  3. Validar con gui_web.py o gui_control_web.py
+  4. Trasladar ganancias a Control_PID_Serial.ino (branch Pruebas)
+  5. Integrar control diferencial completo (dos motores)
+
+================================================================================
+  Fin de documentación — GrandRoot Control
+  Generado con base en análisis de código fuente.
+================================================================================
