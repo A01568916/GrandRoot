@@ -1,22 +1,18 @@
 /*
- * Control_PID_WiFi.ino
+ * Control_PID_Serial.ino
  * ESP32 — Control PI Posicional
- * Robot diferencial con interfaz WiFi (Access Point + WebSocket)
+ * Robot diferencial con comunicación Serial USB → Raspberry Pi
  *
- * Librerías necesarias (instalar en Arduino IDE Library Manager):
- *   - ESPAsyncWebServer  (by lacamera / me-no-dev)
- *   - AsyncTCP           (by dvarrel / me-no-dev)
+ * NO requiere librerías externas.
  *
- * Red WiFi creada: "ESP32-Robot"  password: "robot1234"
- * IP del ESP32:    192.168.4.1
- * WebSocket:       ws://192.168.4.1/ws
+ * Comunicación Serial a 115200 baud:
+ *   → Comandos recibidos desde la RPi:
+ *       ENABLE,true / ENABLE,false
+ *       MOVE,vx,vy
+ *   ← Telemetría enviada a la RPi (cada SAMPLE_MS ms):
+ *       TEL,pi,pd,ri,rd,ei,ed,daci,dacd
  *
- * Comandos WebSocket (idénticos al protocolo Serial original):
- *   → ENABLE,true / ENABLE,false
- *   → MOVE,vx,vy
- *   ← TEL,pi,pd,ri,rd,ei,ed,daci,dacd   (cada SAMPLE_MS ms)
- *
- * FIXES aplicados (heredados del original):
+ * FIXES aplicados:
  *  1. Referencia mínima en giros  → evita alarma del driver
  *  2. Anti-windup correcto        → integral limitada a 255/ki
  *  3. fabsf solo al DAC final     → integral correcta en reversa
@@ -29,25 +25,6 @@
 
 struct MotorState;
 void stepPI(MotorState &m, float T);
-
-// =====================================================
-// LIBRERÍAS WiFi + WebSocket
-// =====================================================
-
-#include <WiFi.h>
-#include <AsyncTCP.h>
-#include <ESPAsyncWebServer.h>
-#include "index_html.h"   // Página web embebida
-
-// =====================================================
-// CONFIGURACIÓN RED
-// =====================================================
-
-const char* AP_SSID     = "ESP32-Robot";
-const char* AP_PASSWORD = "robot1234";   // Mínimo 8 caracteres
-
-AsyncWebServer server(80);
-AsyncWebSocket ws("/ws");
 
 // =====================================================
 // PINES
@@ -91,9 +68,9 @@ const float OMEGA_MAX = VMAX / R_RUEDA;
 float kp = 6.0f;
 float ki = 3.0f;
 
-const float INTEGRAL_MAX    = 255.0f / 3.0f;  // Anti-windup FIX 2
-const int   REF_MIN_GIRO    = 10;              // Ref. mínima FIX 1
-const int   DAC_MIN_ARRANQUE = 60;             // Feedforward FIX 4
+const float INTEGRAL_MAX     = 255.0f / 3.0f;  // Anti-windup FIX 2
+const int   REF_MIN_GIRO     = 10;              // Ref. mínima FIX 1
+const int   DAC_MIN_ARRANQUE = 60;              // Feedforward FIX 4
 
 // =====================================================
 // ENCODERS
@@ -131,6 +108,12 @@ MotorState motor_d = { 0, 0, 0.0f, 0.0f, 0.0f, 0 };
 bool motors_enabled = false;
 
 unsigned long t_prev = 0;
+
+// =====================================================
+// BUFFER SERIAL
+// =====================================================
+
+String serial_buf = "";
 
 // =====================================================
 // DIRECCIÓN MOTORES
@@ -229,6 +212,9 @@ void enableMotores(bool on) {
   }
 
   motors_enabled = on;
+
+  // Confirmar por Serial a la RPi
+  Serial.println(on ? "ENABLE,true" : "ENABLE,false");
 }
 
 // =====================================================
@@ -237,7 +223,7 @@ void enableMotores(bool on) {
 
 void stepPI(MotorState &m, float T) {
 
-  m.error    = (float)m.ref - (float)m.medida;
+  m.error     = (float)m.ref - (float)m.medida;
   m.integral += m.error * T;
   m.integral  = constrain(m.integral, -INTEGRAL_MAX, INTEGRAL_MAX); // FIX 2
 
@@ -255,7 +241,7 @@ void stepPI(MotorState &m, float T) {
 }
 
 // =====================================================
-// PROCESAR COMANDO  (idéntico al original)
+// PROCESAR COMANDO SERIAL
 // =====================================================
 
 void procesarComando(String cmd) {
@@ -266,10 +252,6 @@ void procesarComando(String cmd) {
   if (cmd.startsWith("ENABLE,")) {
     bool on = (cmd.substring(7) == "true");
     enableMotores(on);
-    // Respuesta de confirmación (broadcast a todos los clientes)
-    String resp = "ENABLE,";
-    resp += (on ? "true" : "false");
-    ws.textAll(resp);
   }
 
   // MOVE,vx,vy
@@ -285,41 +267,6 @@ void procesarComando(String cmd) {
     int ri, rd;
     cinematica(vx, vy, ri, rd);
     aplicarMotores(ri, rd);
-  }
-}
-
-// =====================================================
-// CALLBACK WEBSOCKET
-// =====================================================
-
-void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
-               AwsEventType type, void *arg, uint8_t *data, size_t len) {
-
-  if (type == WS_EVT_CONNECT) {
-    Serial.printf("[WS] Cliente #%u conectado desde %s\n",
-                  client->id(),
-                  client->remoteIP().toString().c_str());
-
-  } else if (type == WS_EVT_DISCONNECT) {
-    Serial.printf("[WS] Cliente #%u desconectado\n", client->id());
-    // Si no quedan clientes, apagamos motores por seguridad
-    if (ws.count() == 0) {
-      enableMotores(false);
-      Serial.println("[WS] Sin clientes — motores desactivados");
-    }
-
-  } else if (type == WS_EVT_DATA) {
-    AwsFrameInfo *info = (AwsFrameInfo *)arg;
-    // Solo procesamos frames de texto completos
-    if (info->final && info->index == 0 && info->len == len
-        && info->opcode == WS_TEXT) {
-      String msg = "";
-      for (size_t i = 0; i < len; i++) msg += (char)data[i];
-      procesarComando(msg);
-    }
-
-  } else if (type == WS_EVT_ERROR) {
-    Serial.printf("[WS] Error cliente #%u\n", client->id());
   }
 }
 
@@ -344,22 +291,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(ENC_IZQ), isr_izq, RISING);
   attachInterrupt(digitalPinToInterrupt(ENC_DER), isr_der, RISING);
 
-  // — WiFi Access Point —
-  WiFi.softAP(AP_SSID, AP_PASSWORD);
-  Serial.print("[WiFi] AP iniciado — IP: ");
-  Serial.println(WiFi.softAPIP());   // Siempre 192.168.4.1
-
-  // — WebSocket —
-  ws.onEvent(onWsEvent);
-  server.addHandler(&ws);
-
-  // — Servidor HTTP — sirve la página embebida en index_html.h —
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send_P(200, "text/html", INDEX_HTML);
-  });
-
-  server.begin();
-  Serial.println("[HTTP] Servidor listo en http://192.168.4.1");
+  Serial.println("[ESP32] Listo — esperando comandos por Serial");
 
   t_prev = millis();
 }
@@ -370,8 +302,18 @@ void setup() {
 
 void loop() {
 
-  // Limpieza periódica de clientes WS desconectados
-  ws.cleanupClients();
+  // — Leer comandos desde Serial (RPi) —
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n') {
+      if (serial_buf.length() > 0) {
+        procesarComando(serial_buf);
+        serial_buf = "";
+      }
+    } else if (c != '\r') {
+      serial_buf += c;
+    }
+  }
 
   unsigned long ahora = millis();
 
@@ -405,20 +347,7 @@ void loop() {
       motor_d.dac   = 0;
     }
 
-    // — Telemetría por WebSocket —
-    // Solo enviamos si hay al menos un cliente conectado
-    if (ws.count() > 0) {
-      char buf[80];
-      snprintf(buf, sizeof(buf),
-               "TEL,%ld,%ld,%d,%d,%.1f,%.1f,%d,%d",
-               motor_i.medida, motor_d.medida,
-               motor_i.ref,    motor_d.ref,
-               motor_i.error,  motor_d.error,
-               motor_i.dac,    motor_d.dac);
-      ws.textAll(buf);
-    }
-
-    // Debug por Serial (opcional, puedes comentar esta sección)
+    // — Telemetría por Serial a la RPi —
     Serial.printf("TEL,%ld,%ld,%d,%d,%.1f,%.1f,%d,%d\n",
                   motor_i.medida, motor_d.medida,
                   motor_i.ref,    motor_d.ref,

@@ -1,0 +1,188 @@
+================================================================
+  GRANDROOT — 02 | Servicio systemd del Bridge Python
+================================================================
+
+Objetivo
+--------
+Registrar grandroot_bridge.py como servicio systemd para que
+arranque automáticamente al encender la RPi.
+
+  Script:    /home/grandroot/Downloads/ControlCarr/grandroot_bridge.py
+  HTML:      /home/grandroot/Downloads/ControlCarr/index.html
+  Python:    /home/grandroot/venv/bin/python3
+  Puerto:    /dev/ttyESP32
+  Usuario:   grandroot
+
+
+================================================================
+  1. PREREQUISITOS
+================================================================
+
+  a) Entorno virtual Python con dependencias:
+
+       python3 -m venv /home/grandroot/venv
+       source /home/grandroot/venv/bin/activate
+       pip install websockets pyserial
+
+  b) Usuario con acceso al puerto serial:
+
+       sudo usermod -a -G dialout grandroot
+       newgrp dialout
+
+  c) Regla udev para puerto fijo del ESP32 (ver sección 2)
+
+
+================================================================
+  2. PUERTO SERIAL FIJO PARA EL ESP32 (udev)
+================================================================
+
+  Este ESP32 usa el chip CH340:
+    idVendor  = 1a86
+    idProduct = 7523
+
+  Con el ESP32 conectado por USB, encontrar el puerto:
+
+    sudo dmesg | grep tty | tail -10
+
+  Busca: ch341-uart converter now attached to ttyUSB0
+
+  Crear la regla udev:
+
+    sudo bash -c 'cat > /etc/udev/rules.d/99-esp32.rules << EOF2
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="ttyESP32"
+EOF2'
+
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger
+
+  Desconecta y reconecta el ESP32. Verifica:
+
+    ls /dev/ttyESP32
+
+  Debe responder /dev/ttyESP32 sin errores.
+
+
+================================================================
+  3. CREAR EL ARCHIVO DE SERVICIO
+================================================================
+
+  Ejecuta este comando completo de una sola vez:
+
+    sudo bash -c 'cat > /etc/systemd/system/grandroot.service << EOF2
+[Unit]
+Description=GrandRoot Bridge -- Serial USB -- Websocket
+After=network.target wlan0-static-ip.service dnsmasq.service hostapd.service
+
+[Service]
+Type=simple
+User=grandroot
+WorkingDirectory=/home/grandroot/Downloads/ControlCarr
+ExecStart=/home/grandroot/venv/bin/python3 /home/grandroot/Downloads/ControlCarr/grandroot_bridge.py --port /dev/ttyESP32
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF2'
+
+  VALORES A AJUSTAR si el proyecto cambia de ubicación:
+    User             → resultado de: whoami
+    WorkingDirectory → carpeta donde están los archivos
+    ExecStart        → ruta del python del venv y del script
+    --port           → puerto del ESP32
+
+
+================================================================
+  4. ACTIVAR E INICIAR EL SERVICIO
+================================================================
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable grandroot
+    sudo systemctl start grandroot
+
+  Verificar que está corriendo:
+
+    sudo systemctl status grandroot --no-pager
+
+  Debes ver en los logs:
+    [Serial] Conectado a /dev/ttyESP32 @ 115200 baud
+    [Serial] Hilo lector iniciado
+    [WS]     Servidor en ws://0.0.0.0:8765
+    [HTTP]   Servidor en http://0.0.0.0:8080
+
+
+================================================================
+  5. EXPLICACIÓN DEL ARCHIVO .service
+================================================================
+
+[Unit]
+  After=...        → Espera a que estén listos: IP estática,
+                     dnsmasq y hostapd antes de arrancar
+
+[Service]
+  User             → Corre como usuario normal, no root
+  WorkingDirectory → Necesario para que encuentre index.html
+  ExecStart        → Usa Python del venv (tiene las librerías)
+  Restart=on-failure → Se reinicia si falla o ESP32 se desconecta
+  RestartSec=5     → Espera 5s antes de reintentar
+
+[Install]
+  WantedBy=multi-user.target → Arranca en modo normal de la RPi
+
+
+================================================================
+  6. COMANDOS ÚTILES
+================================================================
+
+    sudo systemctl status grandroot --no-pager  → Ver estado
+    sudo systemctl stop grandroot               → Detener
+    sudo systemctl restart grandroot            → Reiniciar
+    sudo systemctl disable grandroot            → No arrancar solo
+    journalctl -u grandroot -f                  → Logs en vivo
+    sudo ss -tlnp | grep -E "8080|8765"         → Ver puertos
+
+
+================================================================
+  7. ESTRUCTURA DE ARCHIVOS EN LA RPi
+================================================================
+
+  /home/grandroot/Downloads/ControlCarr/
+  ├── grandroot_bridge.py    ← Script Python del bridge
+  └── index.html             ← Interfaz web
+
+  /home/grandroot/venv/      ← Entorno virtual Python
+
+  /etc/systemd/system/
+  ├── grandroot.service          ← Servicio del bridge
+  ├── wlan0-static-ip.service    ← Servicio de IP estática
+  └── dnsmasq.service.d/
+      └── restart.conf           ← Auto-reinicio de dnsmasq
+
+  /etc/udev/rules.d/
+  └── 99-esp32.rules         ← Puerto fijo para ESP32
+
+  /etc/hostapd/
+  └── hostapd.conf           ← Configuración del hotspot GRCC
+
+  /etc/NetworkManager/
+  └── NetworkManager.conf    ← wlan0 marcada como unmanaged
+
+
+================================================================
+  REFERENCIA RÁPIDA
+================================================================
+
+  Probar manualmente:
+    source /home/grandroot/venv/bin/activate
+    python3 /home/grandroot/Downloads/ControlCarr/grandroot_bridge.py --port /dev/ttyESP32
+
+  Ver logs:
+    journalctl -u grandroot -f
+
+  Verificar puertos:
+    sudo ss -tlnp | grep -E "8080|8765"
+
+================================================================
+  GrandRoot — Proyecto de Agricultura de Precisión
+  Equipo Mecatrónica / Mecánica / Biotecnología — ITESM
+================================================================
