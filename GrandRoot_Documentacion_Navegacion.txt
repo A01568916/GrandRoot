@@ -1,0 +1,386 @@
+================================================================================
+  GRANDROOT — DOCUMENTACIÓN DE CÓDIGO (Branch: Navegacion)
+  Proyecto: Carrito autónomo para análisis inteligente del suelo
+  Módulo: Visión Computacional — Detección de Surcos con U-Net
+================================================================================
+
+ÍNDICE
+------
+  1.  camara_tiempo_real.py
+  2.  modelo_final.h5  — Descripción del modelo entrenado
+  3.  ficha_tecnica.json — Metadatos de entrenamiento
+  4.  historial_entrenamiento.png — Interpretación de las curvas
+  5.  RELACIÓN CON OTROS ARCHIVOS DEL PROYECTO
+
+================================================================================
+1. camara_tiempo_real.py
+================================================================================
+
+PROPÓSITO
+  Script de visualización en tiempo real de detección de surcos agrícolas.
+  Captura frames de una webcam, los procesa con el modelo U-Net entrenado
+  (modelo_final.h5) y muestra una ventana con:
+    - Overlay cian sobre los píxeles clasificados como surco
+    - Línea de navegación ajustada con RANSAC (roja=alta confianza,
+      naranja=baja confianza)
+    - Banda central ±45% del ancho (guías amarillas)
+    - HUD con dirección, ángulo, confianza y FPS
+
+  NO controla motores ni se comunica con el ESP32. Es exclusivamente para
+  validar el modelo en campo antes de integrarlo con robot_vision_serial.py.
+
+PLATAFORMA
+  PC o Laptop con Python 3.x (Windows — usa cv2.CAP_DSHOW como backend)
+
+LIBRERÍAS
+  cv2          (OpenCV — captura, visualización, morfología)
+  numpy
+  tensorflow   (carga y ejecución del modelo .h5)
+  time, sys, os
+
+ARCHIVO DE ENTRADA
+  modelo_final.h5  — ruta relativa: ../vision_computacional/modelo_final_vision/
+
+PARÁMETROS DE CONFIGURACIÓN
+  CAMERA_INDEX = 1       Índice de cámara (0=integrada, 1=USB externa)
+  CONF_MIN     = 0.30    Confianza mínima para dibujar línea en rojo
+  ANGLE_UMBRAL = 3.0°    Ángulo máximo para clasificar dirección como "RECTO"
+  DISPLAY_W    = 960     Ancho de la ventana de visualización
+  DISPLAY_H    = 540     Alto de la ventana de visualización
+  IMG_SIZE     = (128, 128)  Tamaño de entrada del modelo
+
+────────────────────────────────────────────────────────────────────────────────
+FUNCIONES PERSONALIZADAS DEL MODELO (necesarias para cargar el .h5)
+────────────────────────────────────────────────────────────────────────────────
+
+  dice_coef(y_true, y_pred, smooth=1.0)
+    Coeficiente Dice — mide solapamiento entre máscara predicha y real.
+    Fórmula: (2 × intersección + smooth) / (suma_true + suma_pred + smooth)
+    Rango: 0.0 (sin solapamiento) → 1.0 (coincidencia perfecta)
+
+  dice_loss(y_true, y_pred)
+    Pérdida basada en Dice: 1.0 − dice_coef. Se minimiza durante entrenamiento.
+
+  bce_dice_loss(y_true, y_pred)
+    Pérdida combinada: Binary Cross-Entropy + Dice Loss.
+    Combina precisión píxel a píxel (BCE) con calidad de forma (Dice).
+
+  iou_metric(y_true, y_pred)
+    Intersección sobre Unión (IoU / Jaccard). Métrica estándar en segmentación.
+    Umbral de binarización: 0.5
+
+  CUSTOM_OBJECTS
+    Diccionario que mapea nombres → funciones. Requerido por
+    tf.keras.models.load_model() para reconstruir correctamente el modelo
+    que fue entrenado con estas métricas custom.
+
+────────────────────────────────────────────────────────────────────────────────
+FUNCIONES DE PROCESAMIENTO
+────────────────────────────────────────────────────────────────────────────────
+
+  ransac_line(pts, n_iter=200, threshold=4.0)
+    Ajusta una recta x = a·y + b a una nube de puntos usando RANSAC
+    (Random Sample Consensus). Robusto ante puntos atípicos (outliers).
+
+    Parámetros:
+      pts        — array Nx2 con coordenadas (x, y) de píxeles del surco
+      n_iter     — iteraciones del algoritmo (más = más preciso, más lento)
+      threshold  — distancia máxima en píxeles para considerar un punto
+                   como inlier
+
+    Retorna: tupla (a, b) de la recta x = a·y + b
+    Fallback: si no converge, usa np.polyfit() como alternativa.
+
+  extract_navigation_line(mask_binary)
+    Extrae la línea de navegación a partir de la máscara binaria 128×128.
+
+    Pasos internos:
+      1. Morfología (cierre + apertura) para limpiar ruido en la máscara
+      2. Aplica banda central ±45% para ignorar elementos periféricos
+      3. Recorre filas de abajo hacia arriba calculando el centroide x
+         de los píxeles activos
+      4. Si hay pocos centros en la banda, usa la máscara completa
+      5. Si hay ≥5 centros, aplica ransac_line()
+      6. Calcula el ángulo de desviación respecto al centro del frame
+      7. Calcula la confianza como fracción de filas con detección válida
+
+    Retorna:
+      pt_bottom  — punto inferior de la línea (x, h-1)
+      pt_top     — punto superior de la línea (x, 10)
+      angulo_deg — desviación en grados respecto al eje vertical
+                   (negativo=izquierda, positivo=derecha)
+      confianza  — valor 0.0–1.0
+
+  procesar_frame(frame_bgr)
+    Pipeline completo para un frame:
+      1. Convierte BGR → RGB
+      2. Redimensiona a 128×128 y normaliza a [0, 1]
+      3. Ejecuta inferencia: model.predict()
+      4. Binariza la predicción con umbral 0.5
+      5. Llama extract_navigation_line()
+      6. Escala los puntos de la línea al tamaño original del frame
+      7. Escala la máscara al tamaño original (INTER_NEAREST)
+      8. Construye overlay: mezcla frame original + capa cian + línea + banda
+
+    Retorna: (overlay_bgr, angulo_deg, confianza)
+
+  dibujar_hud(im, angulo, confianza, fps, paused)
+    Dibuja el Heads-Up Display sobre la imagen de salida:
+      - Panel oscuro semitransparente en la franja superior
+      - Texto de dirección centrado y grande:
+          "^^ RECTO"            si |ángulo| ≤ ANGLE_UMBRAL (verde)
+          "<< GIRAR IZQUIERDA"  si ángulo < −ANGLE_UMBRAL   (naranja)
+          "GIRAR DERECHA >>"    si ángulo > +ANGLE_UMBRAL   (naranja)
+      - Ángulo numérico en grados
+      - Barra de confianza (verde ≥30%, naranja <30%)
+      - FPS en esquina superior derecha
+      - Flecha direccional (arriba/izquierda/derecha)
+      - Texto "PAUSADO" centrado cuando el sistema está en pausa
+      - Leyenda de colores en la parte inferior
+
+  escanear_camaras(max_idx=5)
+    Prueba índices de cámara 0..4 y devuelve los que efectivamente
+    producen un frame válido. Necesario en Windows porque isOpened()
+    puede devolver True para índices inválidos.
+
+  main()
+    Bucle principal:
+      1. Escanea cámaras disponibles
+      2. Abre la cámara seleccionada a 640×480
+      3. Loop: captura → procesar_frame → dibujar_hud → imshow
+      4. Calcula FPS con suavizado exponencial (α=0.15)
+      5. Atiende teclado: Q/ESC=salir, S=screenshot, SPACE=pausa
+
+────────────────────────────────────────────────────────────────────────────────
+FLUJO DE DATOS COMPLETO
+────────────────────────────────────────────────────────────────────────────────
+
+  Webcam (640×480 BGR)
+      ↓ resize + normalize
+  Tensor (1, 128, 128, 3) float32
+      ↓ model.predict()
+  Máscara (128, 128, 1) float32  [0.0–1.0]
+      ↓ umbral 0.5
+  Máscara binaria (128, 128) uint8  [0 o 1]
+      ↓ extract_navigation_line()
+  pt_bottom, pt_top, ángulo, confianza
+      ↓ scale + overlay
+  Frame anotado (640×480 BGR)
+      ↓ resize → DISPLAY_W×DISPLAY_H
+      ↓ dibujar_hud()
+  Ventana OpenCV
+
+────────────────────────────────────────────────────────────────────────────────
+CONTROLES DE TECLADO
+────────────────────────────────────────────────────────────────────────────────
+
+  Q / ESC   → cerrar aplicación
+  S         → guardar screenshot como screenshot_NNN.png en la misma carpeta
+  SPACE     → pausar/reanudar (el último frame queda congelado en pantalla)
+
+NOTAS DE USO
+  - Cambiar CAMERA_INDEX si la cámara correcta no es la índice 1.
+  - El script detecta automáticamente la cámara disponible si CAMERA_INDEX
+    no está conectado.
+  - Para integrar con los motores, usar robot_vision_serial.py (branch Pruebas)
+    que comparte las mismas funciones de procesamiento.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+2. modelo_final.h5 — Descripción del Modelo Entrenado
+================================================================================
+
+TIPO DE MODELO
+  U-Net — arquitectura encoder-decoder para segmentación semántica binaria.
+  Tarea: clasificar cada píxel como "surco" (1) o "fondo" (0).
+
+TAMAÑO DEL ARCHIVO
+  ~23 MB (contiene pesos, arquitectura y configuración de optimizador)
+
+ENTRADA
+  Tensor: (batch, 128, 128, 3)
+  Tipo:   float32 normalizado [0.0, 1.0]
+  Espacio de color: RGB
+
+SALIDA
+  Tensor: (batch, 128, 128, 1)
+  Tipo:   float32 en [0.0, 1.0]
+  Interpretación: probabilidad de que cada píxel pertenezca a un surco.
+  Para obtener máscara binaria: pred > 0.5
+
+ARQUITECTURA U-Net (estructura general)
+  Encoder (contracción):
+    Bloques de Conv2D + BatchNorm + ReLU con MaxPooling para reducir
+    la resolución espacial y extraer características.
+  Bottleneck:
+    Bloque central de mayor profundidad de canales.
+  Decoder (expansión):
+    Bloques de UpSampling / Conv2DTranspose con skip connections desde
+    el encoder correspondiente. Reconstruye la resolución espacial.
+  Capa de salida:
+    Conv2D con 1 filtro y activación sigmoid → probabilidad por píxel.
+
+CÓMO CARGARLO EN PYTHON
+  import tensorflow as tf
+
+  def dice_coef(y_true, y_pred, smooth=1.0):
+      y_true_f = tf.keras.backend.flatten(y_true)
+      y_pred_f = tf.keras.backend.flatten(y_pred)
+      inter    = tf.keras.backend.sum(y_true_f * y_pred_f)
+      return (2. * inter + smooth) / (
+          tf.keras.backend.sum(y_true_f) + tf.keras.backend.sum(y_pred_f) + smooth)
+
+  def dice_loss(y_true, y_pred):
+      return 1.0 - dice_coef(y_true, y_pred)
+
+  def bce_dice_loss(y_true, y_pred):
+      return tf.keras.losses.binary_crossentropy(y_true, y_pred) + dice_loss(y_true, y_pred)
+
+  def iou_metric(y_true, y_pred):
+      y_pred_b = tf.cast(y_pred > 0.5, tf.float32)
+      inter    = tf.reduce_sum(y_true * y_pred_b)
+      union    = tf.reduce_sum(y_true) + tf.reduce_sum(y_pred_b) - inter
+      return (inter + 1.0) / (union + 1.0)
+
+  model = tf.keras.models.load_model(
+      'modelo_final.h5',
+      custom_objects={
+          'bce_dice_loss': bce_dice_loss,
+          'dice_coef':     dice_coef,
+          'iou_metric':    iou_metric
+      }
+  )
+
+  NOTA: Las funciones custom_objects son obligatorias. Sin ellas,
+  load_model() lanza un error al no reconocer las métricas personalizadas.
+
+PREPROCESAMIENTO REQUERIDO
+  img = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+  img = cv2.resize(img, (128, 128)).astype(np.float32) / 255.0
+  pred = model.predict(img[np.newaxis, ...])[0, :, :, 0]  # (128, 128)
+
+--------------------------------------------------------------------------------
+
+================================================================================
+3. ficha_tecnica.json — Metadatos de Entrenamiento
+================================================================================
+
+  Fecha de entrenamiento  : 2026-05-14
+  Arquitectura            : U-Net
+  Tamaño de imagen        : 128 × 128 px
+  Batch size              : 8
+  Épocas entrenadas       : 40
+  Learning rate           : 1×10⁻⁵  (muy conservador — fine-tuning)
+  Dataset utilizado       : 277 fotografías de surcos agrícolas
+  Estrategia              : Fine-tuning con pseudo-etiquetas
+
+RESULTADOS FINALES
+  Pérdida entrenamiento   : 0.4824
+  Pérdida validación      : 0.4359  (mejor que train → sin sobreajuste)
+  Coeficiente Dice val    : 0.6272  (62.7% de solapamiento promedio)
+
+MÉTRICAS UTILIZADAS
+  dice_coef    Coeficiente Dice (equivalente a F1-score para segmentación)
+               Mide el solapamiento entre máscara predicha y máscara real.
+  iou_metric   Intersección sobre Unión (Jaccard Index)
+               Métrica estándar en segmentación semántica.
+  bce_dice_loss  Pérdida combinada: BCE + Dice Loss
+               Penaliza tanto errores píxel a píxel como errores de forma.
+
+ESTRATEGIA: Fine-tuning con Pseudo-etiquetas
+  Se parte de un modelo U-Net pre-entrenado (pesos base ya aprendidos).
+  Se etiquetan automáticamente imágenes nuevas con las predicciones del
+  modelo anterior (pseudo-etiquetas) y se usa ese conjunto ampliado para
+  hacer un ajuste fino con learning rate bajo (1×10⁻⁵) para no destruir
+  los pesos aprendidos.
+
+  Ventaja: permite mejorar el modelo con pocas imágenes etiquetadas
+  manualmente (277 fotos en lugar de miles).
+
+--------------------------------------------------------------------------------
+
+================================================================================
+4. historial_entrenamiento.png — Interpretación de las Curvas
+================================================================================
+
+GRÁFICA IZQUIERDA: Pérdida (Loss) vs Épocas
+  - Eje Y: valor de bce_dice_loss (menor = mejor)
+  - Eje X: época (0–40)
+
+  Observaciones:
+  • La pérdida cae rápidamente de ~1.6 a ~0.7 en las primeras 10 épocas,
+    indicando aprendizaje efectivo de las características principales del surco.
+  • Entre épocas 10–40 la curva se aplana, señalando convergencia.
+  • Val Loss (naranja) es consistentemente MENOR que Train Loss (azul) a
+    partir de la época ~35. Esto es normal con pseudo-etiquetas y fine-tuning:
+    el conjunto de validación puede ser más "limpio" que el de entrenamiento.
+  • No hay divergencia entre curvas → ausencia de sobreajuste (overfitting).
+  • Pérdida final: train=0.4824, val=0.4359.
+
+GRÁFICA DERECHA: Coeficiente Dice vs Épocas
+  - Eje Y: dice_coef (mayor = mejor, máximo teórico = 1.0)
+  - Eje X: época (0–40)
+
+  Observaciones:
+  • El Dice parte de ~0.19 (modelo casi aleatorio) y sube a ~0.63 en validación.
+  • La forma sigmoidal de la curva es característica de U-Net: aprendizaje lento
+    al inicio, aceleración entre épocas 5–20, y meseta final.
+  • Val Dice (naranja) supera a Train Dice (azul) al final → consistente con
+    la observación de la pérdida. No indica sobreajuste.
+  • Valor final Dice=0.627: razonable para un dataset pequeño (277 imágenes)
+    con condiciones de campo variables (iluminación, tipo de suelo).
+
+CONCLUSIÓN
+  El modelo aprendió a segmentar surcos de forma consistente. Un Dice de 0.63
+  significa que en promedio el 63% de los píxeles del surco son detectados
+  correctamente. Para navegación autónoma esto es suficiente dado que el
+  algoritmo RANSAC posterior filtra el ruido restante.
+
+  Para mejorar el Dice score se recomienda:
+  1. Ampliar el dataset (más fotos en condiciones diversas)
+  2. Data augmentation (rotación, brillo, flips)
+  3. Aumentar épocas con scheduler de learning rate
+  4. Usar un modelo U-Net más profundo o con backbone pre-entrenado (ResNet)
+
+--------------------------------------------------------------------------------
+
+================================================================================
+5. RELACIÓN CON OTROS ARCHIVOS DEL PROYECTO
+================================================================================
+
+Branch Navegacion (este módulo):
+  camara_tiempo_real.py    ←── modelo_final.h5   (inferencia)
+  camara_tiempo_real.py    ←── ficha_tecnica.json (referencia documentación)
+  historial_entrenamiento.png (evidencia del proceso de entrenamiento)
+
+Conexión con Branch Pruebas:
+  robot_vision_serial.py   ←── modelo_final.h5   (misma inferencia)
+  robot_vision_serial.py   →   Carrito_Vision.ino (comandos MOVE por Serial)
+
+Diferencia entre los dos scripts de visión:
+  camara_tiempo_real.py    → SOLO visualización, sin motores
+  robot_vision_serial.py   → Visualización + control de motores vía Serial
+
+  Se recomienda validar el modelo primero con camara_tiempo_real.py en campo
+  y, una vez confirmado el funcionamiento, pasar a robot_vision_serial.py
+  con el ESP32 conectado.
+
+Pipeline completo de navegación autónoma:
+  Cámara USB
+      ↓ frame BGR
+  camara_tiempo_real.py / robot_vision_serial.py
+      ↓ model.predict (modelo_final.h5)
+  Máscara de surcos (128×128)
+      ↓ RANSAC → ángulo de desviación
+  Comando MOVE,vx,vy
+      ↓ Serial USB
+  Carrito_Vision.ino / Control_PID_Serial.ino (ESP32)
+      ↓ DAC / PWM
+  Motores → corrección de trayectoria
+
+================================================================================
+  Fin de documentación — GrandRoot Navegacion
+  Generado con base en análisis de código fuente, ficha técnica y gráficas
+  de entrenamiento.
+================================================================================
