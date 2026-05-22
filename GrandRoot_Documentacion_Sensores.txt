@@ -1,0 +1,344 @@
+================================================================================
+  GRANDROOT — DOCUMENTACIÓN DE CÓDIGO (Branch: Sensores)
+  Proyecto: Carrito autónomo para análisis inteligente del suelo
+  Módulo: Sensores — GPS y IMU (MPU9250)
+================================================================================
+
+ÍNDICE
+------
+  1.  GPS_datoslimpio.ino     — Lectura GPS con conversión a coordenadas locales
+  2.  mpu9250_lectura.ino     — Lectura IMU: acelerómetro y giroscopio
+  3.  CONEXIONES DE HARDWARE — Resumen de pines
+  4.  RELACIÓN CON OTRAS BRANCHES
+
+================================================================================
+1. GPS_datoslimpio.ino
+================================================================================
+
+PROPÓSITO
+  Lee datos de un módulo GPS mediante el puerto UART2 del ESP32, parsea
+  las tramas NMEA con la librería TinyGPS++ y envía por Serial (USB) las
+  coordenadas geográficas en dos formatos simultáneos:
+    - Latitud/Longitud decimales (para transmisión al dashboard)
+    - Coordenadas locales X/Y en metros respecto a un punto de referencia fijo
+      (para algoritmos de navegación y posicionamiento relativo)
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  TinyGPS++  (instalar desde Arduino IDE Library Manager: "TinyGPSPlus")
+
+HARDWARE CONECTADO
+  Módulo GPS con salida UART (ej: NEO-6M, NEO-7M, NEO-8M o compatible)
+  Baud rate del módulo: 9600
+
+CONEXIÓN FÍSICA (UART2 del ESP32)
+  GPS TX  →  ESP32 GPIO 16 (RXD2)
+  GPS RX  →  ESP32 GPIO 17 (TXD2)   ← opcional, solo si se envían comandos al GPS
+  GPS VCC →  3.3 V o 5 V según módulo
+  GPS GND →  GND
+
+PARÁMETROS
+  GPS_BAUDRATE = 9600
+  RXD2         = GPIO 16   (recepción de datos del GPS)
+  TXD2         = GPIO 17   (transmisión hacia el GPS — no se usa en este sketch)
+
+PUNTO DE REFERENCIA (origen del sistema local X/Y)
+  lat0 =  28.7385775000   (latitud  del origen)
+  lon0 = -106.1217361670  (longitud del origen)
+  Corresponde a la zona de pruebas del proyecto (Chihuahua, México).
+  Cambiar estos valores antes de operar en otro campo.
+
+────────────────────────────────────────────────────────────────────────────────
+FUNCIONES PRINCIPALES
+────────────────────────────────────────────────────────────────────────────────
+
+  gpsToX(lat, lon)
+    Convierte coordenadas GPS a desplazamiento X en metros respecto al origen.
+    Fórmula: X = (lon − lon0) × cos(lat0 × π/180) × 111320
+    El factor cos(lat0) corrige la distorsión de los meridianos a la latitud
+    del punto de referencia. 111320 m/° es la longitud de un grado de latitud.
+
+  gpsToY(lat, lon)
+    Convierte coordenadas GPS a desplazamiento Y en metros respecto al origen.
+    Fórmula: Y = (lat − lat0) × 111320
+    Eje Y positivo = norte.
+
+  setup()
+    - Inicializa Serial (USB) a 115200 baud para depuración.
+    - Inicializa Serial2 a 9600 baud en GPIO 16/17 para recibir datos del GPS.
+
+  loop()
+    - Lee bytes del GPS (Serial2) y los pasa a gps.encode().
+    - TinyGPS++ parsea internamente las tramas NMEA (GPRMC, GPGGA, etc.).
+    - Cuando hay una trama completa y la posición es válida (gps.location.isValid()):
+        Calcula lat, lon, x, y.
+        Imprime por Serial: "lat,lon,x,y,satelites"
+    - Si la posición no es válida: imprime "ESTOY AGARRANDO SEÑAL CARNAL"
+      (mensaje de depuración informal — indica que el GPS aún no tiene fix).
+    - Watchdog: si después de 10 segundos se han procesado menos de 10
+      caracteres, imprime "No GPS data received: check wiring".
+
+────────────────────────────────────────────────────────────────────────────────
+TRAMA DE SALIDA SERIAL
+────────────────────────────────────────────────────────────────────────────────
+
+  Formato: "lat,lon,x,y,satelites\n"
+  Ejemplo:  "28.7386012345,-106.1217089234,3.04,2.67,8"
+
+  Campos:
+    lat        — latitud en grados decimales, 10 decimales de precisión
+    lon        — longitud en grados decimales, 10 decimales de precisión
+    x          — desplazamiento Este-Oeste en metros desde el punto de referencia
+    y          — desplazamiento Norte-Sur en metros desde el punto de referencia
+    satelites  — número de satélites GPS con fix activo
+
+────────────────────────────────────────────────────────────────────────────────
+PRECISIÓN Y LIMITACIONES
+────────────────────────────────────────────────────────────────────────────────
+
+  - La proyección plana (gpsToX / gpsToY) es válida para distancias cortas
+    (< 10 km del punto de referencia). Para distancias mayores se acumula error
+    por la curvatura de la Tierra.
+  - La precisión del GPS es típicamente ±2–5 metros con módulos NEO sin
+    corrección diferencial (DGPS).
+  - El GPS necesita visión directa del cielo para obtener fix. En interior
+    o bajo techo puede tardar varios minutos o no obtener señal.
+  - Las tramas de fecha/hora están comentadas en el código. Descomentarlas
+    si se necesita timestamp en los datos.
+  - El número de satélites (gps.satellites.value()) está comentado en el
+    Serial.println del inicio del loop — ya está activo en la trama de salida.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+2. mpu9250_lectura.ino
+================================================================================
+
+PROPÓSITO
+  Lee el acelerómetro y el giroscopio del sensor MPU9250 vía protocolo I2C
+  e imprime los valores por Serial cada 100 ms. No utiliza librerías externas:
+  toda la comunicación I2C está implementada manualmente con Wire.h para
+  tener control total sobre los registros del sensor.
+
+PLATAFORMA
+  ESP32
+
+LIBRERÍAS
+  Wire.h  (incluida en Arduino IDE — no requiere instalación)
+
+HARDWARE CONECTADO
+  Sensor IMU MPU9250 (acelerómetro + giroscopio + magnetómetro)
+  Protocolo: I2C
+
+CONEXIÓN FÍSICA (I2C del ESP32)
+  MPU9250 VCC  →  3.3 V del ESP32   (NO conectar a 5 V — dañaría el sensor)
+  MPU9250 GND  →  GND
+  MPU9250 SCL  →  GPIO 22           (I2C SCL por defecto del ESP32)
+  MPU9250 SDA  →  GPIO 21           (I2C SDA por defecto del ESP32)
+  MPU9250 AD0  →  GND               → dirección I2C = 0x68
+                  (conectar a 3.3 V para cambiar a dirección 0x69,
+                   útil si se tienen dos MPU9250 en el mismo bus)
+
+PARÁMETROS
+  INTERVALO_MS = 100   ms entre lecturas (10 Hz)
+
+────────────────────────────────────────────────────────────────────────────────
+REGISTROS I2C DEL MPU9250
+────────────────────────────────────────────────────────────────────────────────
+
+  0x19  REG_SMPLRT_DIV   Divisor de frecuencia de muestreo interno
+                         Frec. muestreo = 1 kHz / (1 + SMPLRT_DIV)
+                         Valor 0x07 → 1000/(1+7) = 125 Hz
+
+  0x1A  REG_CONFIG       Filtro paso-bajo digital (DLPF)
+                         Valor 0x06 → DLPF activado, ancho de banda ~5 Hz
+                         Filtra vibraciones mecánicas de alta frecuencia
+
+  0x1B  REG_GYRO_CFG     Escala del giroscopio
+                         0x00 → ±250  °/s  (131 LSB/°/s)
+                         0x08 → ±500  °/s
+                         0x10 → ±1000 °/s
+                         0x18 → ±2000 °/s
+
+  0x1C  REG_ACCEL_CFG    Escala del acelerómetro
+                         0x00 → ±2 g   (16384 LSB/g)
+                         0x08 → ±4 g
+                         0x10 → ±8 g
+                         0x18 → ±16 g
+
+  0x3B  REG_ACCEL_XOUT   Primer byte de datos del acelerómetro
+                         6 bytes seguidos: Ax_H, Ax_L, Ay_H, Ay_L, Az_H, Az_L
+
+  0x43  REG_GYRO_XOUT    Primer byte de datos del giroscopio
+                         6 bytes seguidos: Gx_H, Gx_L, Gy_H, Gy_L, Gz_H, Gz_L
+
+  0x6B  REG_PWR_MGMT_1   Control de energía
+                         Valor 0x00 → despierta el sensor (sale del modo sleep)
+
+  0x75  REG_WHO_AM_I     Identificador del chip
+                         MPU9250 → 0x71
+                         MPU9255 → 0x73
+
+────────────────────────────────────────────────────────────────────────────────
+FACTORES DE ESCALA
+────────────────────────────────────────────────────────────────────────────────
+
+  ACCEL_SCALE = 16384.0   LSB/g   (para ±2 g)
+  GYRO_SCALE  =   131.0   LSB/(°/s)  (para ±250 °/s)
+
+  Conversión: valor_físico = valor_raw / factor_escala
+
+────────────────────────────────────────────────────────────────────────────────
+FUNCIONES AUXILIARES I2C
+────────────────────────────────────────────────────────────────────────────────
+
+  escribirReg(reg, valor)
+    Escribe un byte en un registro del MPU9250.
+    Secuencia I2C: START → dirección (write) → reg → valor → STOP
+
+  leerReg(reg)
+    Lee un byte de un registro.
+    Secuencia: START → dirección (write) → reg → REPEATED START →
+               dirección (read) → byte → STOP
+    Retorna 0xFF si no hay dato disponible.
+
+  leerBytes(reg, buf, n)
+    Lee n bytes consecutivos desde el registro base (burst read).
+    El MPU9250 incrementa automáticamente el puntero de registro en cada
+    byte leído, permitiendo leer los 6 bytes de acelerómetro o giroscopio
+    en una sola transacción I2C.
+
+  combinar(hi, lo)
+    Combina dos bytes big-endian en un int16_t con signo.
+    Fórmula: (int16_t)((uint16_t)hi << 8 | lo)
+    El sensor envía el byte más significativo primero (big-endian).
+
+────────────────────────────────────────────────────────────────────────────────
+FLUJO DE SETUP
+────────────────────────────────────────────────────────────────────────────────
+
+  1. Serial a 9600 baud
+  2. Wire.begin() — inicia I2C en GPIO 21/22
+  3. delay(250) — espera estabilización del sensor
+  4. Lee WHO_AM_I y verifica que sea 0x71 o 0x73
+     → Si no coincide: imprime diagnóstico detallado y se congela con while(true)
+  5. PWR_MGMT_1 = 0x00 → despierta el sensor
+  6. delay(100) — espera que el sensor complete el arranque interno
+  7. Configura SMPLRT_DIV, CONFIG, GYRO_CFG, ACCEL_CFG con los valores por defecto
+
+────────────────────────────────────────────────────────────────────────────────
+FLUJO DE LOOP
+────────────────────────────────────────────────────────────────────────────────
+
+  1. leerBytes(REG_ACCEL_XOUT, raw, 6) → 6 bytes del acelerómetro
+  2. Convierte raw[0..5] a ax, ay, az en unidades g
+  3. leerBytes(REG_GYRO_XOUT, raw, 6) → 6 bytes del giroscopio
+  4. Convierte raw[0..5] a gx, gy, gz en °/s
+  5. Imprime por Serial en formato tabla
+  6. delay(INTERVALO_MS) → 100 ms
+
+  Nota: La temperatura del sensor ocupa los registros 0x41–0x42 (bytes 6–7
+  entre acelerómetro y giroscopio). No se lee en este sketch.
+
+────────────────────────────────────────────────────────────────────────────────
+SALIDA SERIAL
+────────────────────────────────────────────────────────────────────────────────
+
+  Encabezado al arrancar:
+    =================================================
+      MPU9250 — Acelerometro + Giroscopio (ESP32)
+    =================================================
+    WHO_AM_I = 0x71  (esperado: 0x71 o 0x73)
+    Sensor configurado correctamente.
+
+      Ax(g)    Ay(g)    Az(g)   |   Gx(°/s)  Gy(°/s)  Gz(°/s)
+      -------------------------------------------------------
+
+  Datos cada 100 ms:
+      0.0023   0.0105   1.0012  |     0.152    -0.031     0.008
+
+  Valores típicos en reposo sobre una superficie plana:
+    Ax ≈ 0 g, Ay ≈ 0 g, Az ≈ ±1 g (gravedad)
+    Gx ≈ 0 °/s, Gy ≈ 0 °/s, Gz ≈ 0 °/s
+
+────────────────────────────────────────────────────────────────────────────────
+DIAGNÓSTICO DE ERRORES
+────────────────────────────────────────────────────────────────────────────────
+
+  Si WHO_AM_I devuelve un valor incorrecto (ni 0x71 ni 0x73):
+    "ERROR: Sensor no detectado."
+    Posibles causas y soluciones que el código sugiere:
+      - Verificar cableado SDA (GPIO 21) y SCL (GPIO 22)
+      - Verificar dirección I2C: AD0 a GND (0x68) o 3.3 V (0x69)
+      - Verificar alimentación (3.3 V — NO 5 V)
+    El programa se detiene (while(true)) hasta que se corrija el problema
+    y se reinicie el ESP32.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+3. CONEXIONES DE HARDWARE — Resumen de pines
+================================================================================
+
+ESP32 — Módulo GPS (UART2)
+  GPIO 16  RXD2  ← TX del módulo GPS
+  GPIO 17  TXD2  → RX del módulo GPS  (generalmente no se usa)
+  3.3 V o 5 V    → VCC del módulo GPS (revisar datasheet del módulo específico)
+  GND            → GND del módulo GPS
+
+ESP32 — MPU9250 (I2C)
+  GPIO 21  SDA   ↔ SDA del MPU9250
+  GPIO 22  SCL   ↔ SCL del MPU9250
+  3.3 V          → VCC del MPU9250   (NUNCA 5 V)
+  GND            → GND del MPU9250
+  GND            → AD0 del MPU9250   (selecciona dirección 0x68)
+
+CONFLICTO DE PINES: GPIO 21
+  El GPIO 21 es SDA del I2C (MPU9250) y también se usa como EN_IZQ
+  (enable motor izquierdo) en las branches Pruebas y Control.
+  NO conectar simultáneamente el MPU9250 y los drivers de motor al GPIO 21
+  sin reasignar uno de los dos en el código.
+
+VELOCIDADES SERIAL
+  Serial  (USB / debug) : 115200 baud — GPS_datoslimpio.ino
+  Serial  (USB / debug) :   9600 baud — mpu9250_lectura.ino
+  Serial2 (GPS)         :   9600 baud — GPS_datoslimpio.ino
+
+--------------------------------------------------------------------------------
+
+================================================================================
+4. RELACIÓN CON OTRAS BRANCHES
+================================================================================
+
+Branch Sensores → Branch Interfaz
+  GPS_datoslimpio.ino produce los campos lat, lon, x, y y satélites que
+  el backend debe recopilar y enviar como parte del evento 'telemetry'
+  al grandroot_dashboard.html.
+  Los campos lat, lon, alt y fix del footer del dashboard corresponden
+  directamente a los datos de este sketch.
+
+Branch Sensores → Branch Navegacion
+  mpu9250_lectura.ino es la base para obtener el rumbo (heading) del robot.
+  Para calcular el ángulo de orientación real se necesita integrar el giroscopio
+  (gz) en el tiempo o fusionar datos con un filtro Mahony/Madgwick.
+  El campo 'heading' del evento 'telemetry' del dashboard provendría de
+  este procesamiento.
+
+Branch Sensores → Branch Pruebas
+  El GPS puede complementar los encoders de rueda para corrección de deriva.
+  La posición X/Y de GPS_datoslimpio.ino puede usarse como referencia global
+  en el algoritmo de navegación autónoma.
+
+Integración futura recomendada
+  Para el sistema completo, el backend de la Raspberry Pi debería leer:
+    - Serial2 (ESP32) → datos GPS como "lat,lon,x,y,satelites\n"
+    - I2C (ESP32)     → datos IMU como "ax,ay,az,gx,gy,gz\n"  (o vía Serial)
+  y combinarlos con los datos de control de motores (TEL del ESP32) para
+  publicar un único evento 'telemetry' completo al dashboard.
+
+================================================================================
+  Fin de documentación — GrandRoot Sensores
+  Generado con base en análisis del código fuente.
+================================================================================
