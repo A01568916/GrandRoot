@@ -1,0 +1,637 @@
+================================================================================
+  GRANDROOT — DOCUMENTACIÓN DE CÓDIGO (Branch: Interfaz)
+  Proyecto: Carrito autónomo para análisis inteligente del suelo
+  Módulo: Panel de Control Principal — Dashboard Web Integrado
+================================================================================
+
+ÍNDICE
+------
+  1.  Descripción general
+  2.  Tecnologías y dependencias
+  3.  Layout y estructura visual
+  4.  Secciones del panel izquierdo
+      4.1  Modo de operación
+      4.2  Control de motores
+      4.3  Telemetría
+      4.4  D-pad / Control manual
+  5.  Mapa interactivo (panel derecho)
+  6.  Footer — GPS y parada de emergencia
+  7.  Panel de administración (acceso por contraseña)
+      7.1  Modal de login
+      7.2  Telemetría técnica detallada
+      7.3  Parámetros editables del controlador PI
+      7.4  Terminal de log
+  8.  Sistema de comunicación con el backend
+      8.1  Socket.IO (conexión real)
+      8.2  Modo simulación (sin backend)
+  9.  Funciones JavaScript principales
+  10. Eventos emitidos hacia el backend (socket.io)
+  11. Eventos recibidos desde el backend
+  12. Consideraciones de seguridad
+  13. Relación con otras branches
+
+================================================================================
+1. DESCRIPCIÓN GENERAL
+================================================================================
+
+ARCHIVO
+  grandroot_dashboard.html
+
+PROPÓSITO
+  Panel de control principal e integrado del robot GrandRoot. Es una
+  aplicación web de página única (SPA) que centraliza:
+    - Selección del modo de operación (Automático / Manual)
+    - Activación y detención de motores
+    - Telemetría en tiempo real (velocidad, rumbo, ángulo U-Net, confianza)
+    - Control manual mediante D-pad en pantalla o teclado (W A S D / flechas)
+    - Mapa GPS interactivo con trayectoria del robot
+    - Coordenadas GPS en vivo en el footer
+    - Parada de emergencia global
+    - Panel de administración protegido por contraseña con telemetría
+      técnica detallada y ajuste de parámetros del controlador PI
+
+  El dashboard se conecta al backend vía Socket.IO. Si no hay backend
+  disponible, entra automáticamente en modo simulación para poder
+  demostrar y probar la interfaz sin hardware.
+
+PLATAFORMA
+  Navegador web moderno (Chrome, Firefox, Edge). Optimizado para pantallas
+  de escritorio (1280×720 o mayor). Responsive básico para tablets.
+
+CÓMO ABRIR
+  Opción A (con backend Flask-SocketIO):
+    Servir el archivo desde el servidor Python que corra el puente
+    grandroot_bridge.py o equivalente con Flask-SocketIO.
+    Abrir http://<IP_RPi>:8080 (o el puerto configurado).
+
+  Opción B (standalone, sin backend):
+    Abrir el archivo directamente en el navegador (doble clic).
+    El dashboard detecta automáticamente la ausencia de Socket.IO y
+    activa la simulación de telemetría.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+2. TECNOLOGÍAS Y DEPENDENCIAS
+================================================================================
+
+  Leaflet 1.9.4 (CDN)
+    https://unpkg.com/leaflet@1.9.4/dist/leaflet.css
+    https://unpkg.com/leaflet@1.9.4/dist/leaflet.js
+    Mapa interactivo con tiles de OpenStreetMap.
+    Marcador del robot con icono SVG personalizado y polilínea de trayectoria.
+
+  Socket.IO (carga dinámica desde /socket.io/socket.io.js)
+    Comunicación bidireccional en tiempo real con el backend.
+    Se carga de forma no bloqueante: si falla (sin backend),
+    la variable window.__NO_BACKEND se activa y se usa simulación.
+
+  Sin frameworks CSS externos:
+    Todo el estilo está escrito en CSS puro con variables CSS (--bg, --green,
+    --yellow, etc.) dentro del propio archivo HTML.
+
+  Sin frameworks JavaScript:
+    Vanilla JS puro. No se usa React, Vue, ni jQuery.
+
+  Coordenadas por defecto (modo simulación):
+    Latitud:  28.6353
+    Longitud: -106.0889
+    (Chihuahua, México — zona de pruebas del proyecto)
+
+--------------------------------------------------------------------------------
+
+================================================================================
+3. LAYOUT Y ESTRUCTURA VISUAL
+================================================================================
+
+  La página usa un grid de 3 filas:
+    Fila 1 (48 px):   header
+    Fila 2 (flex):    main (panel izquierdo + mapa)
+    Fila 3 (58 px):   footer (GPS + parada de emergencia)
+
+  Dentro del main, hay un grid de 2 columnas:
+    Columna izquierda (420 px fijo): panel de control y telemetría
+    Columna derecha   (resto):       mapa Leaflet a pantalla completa
+
+  TEMA DE COLORES (variables CSS)
+    --bg:        #111318  fondo global
+    --surface:   #1a1d24  superficies de panel
+    --surface2:  #21252e  superficies secundarias (tarjetas, inputs)
+    --border:    #2e3340  bordes y separadores
+    --green:     #00c896  color principal / estados OK
+    --green-dim: #004d3a  fondo verde oscuro (botones activos)
+    --yellow:    #ffb400  advertencias, modo manual
+    --red:       #ff3b30  error, parada, desconexión
+    --blue:      #0a84ff  acento secundario
+    --text:      #e2e6ef  texto principal
+    --text-dim:  #7a8296  texto secundario / labels
+
+  HEADER
+    Logo "GRANDROOT" (verde) + subtítulo "Panel de Control"
+    Reloj en tiempo real (actualiza cada 1 segundo)
+    Botón "⚙ Admin" → abre el modal de contraseña
+    Badge de conexión con punto animado (rojo=desconectado, verde=conectado/simulación)
+
+  FOOTER
+    Botón "⛔ Parada de emergencia" (rojo, borde izquierdo)
+    4 celdas GPS: Latitud, Longitud, Altitud, Fix GPS
+
+--------------------------------------------------------------------------------
+
+================================================================================
+4. SECCIONES DEL PANEL IZQUIERDO
+================================================================================
+
+4.1 MODO DE OPERACIÓN
+──────────────────────
+
+  Dos botones tipo toggle:
+    "⚡ Automático"  → el modelo U-Net toma el control de la navegación
+    "🕹 Manual"      → el operador controla con D-pad o teclado
+
+  Al cambiar de modo:
+    - Se actualiza el estilo visual del botón activo (verde=auto, amarillo=manual)
+    - Se muestra un chip explicativo debajo de los botones
+    - El D-pad se habilita o deshabilita (pointer-events + opacidad)
+    - Se emite el evento 'set_mode' al backend vía Socket.IO
+
+  Estado inicial: Automático (modo autónomo).
+
+────────────────────────────────────────────────────────────────────────────────
+
+4.2 CONTROL DE MOTORES
+───────────────────────
+
+  Botón "▶ Activar" (verde):
+    - Cambia el indicador LED a verde parpadeante
+    - Muestra "Motores activos" en color verde
+    - Emite 'motor_cmd' → { action: 'start' } al backend
+
+  Botón "■ Detener" (rojo):
+    - Cambia el indicador LED a rojo fijo
+    - Muestra "Motores detenidos" en color rojo
+    - Emite 'motor_cmd' → { action: 'stop' } al backend
+
+  Indicador LED:
+    CSS: .motor-led — círculo de 8 px
+    Estados: sin clase (gris), .on (verde parpadeante), .off (rojo fijo)
+
+────────────────────────────────────────────────────────────────────────────────
+
+4.3 TELEMETRÍA
+───────────────
+
+  3 tarjetas horizontales:
+    Velocidad    — float en m/s, coloreado por rango:
+                   < 0.01 m/s → sin clase (blanco)
+                   0.01–0.5   → warn (amarillo)
+                   > 0.5      → good (verde)
+
+    Rumbo        — entero en grados (0–360), sin coloración dinámica
+
+    Ángulo U-Net — desviación de trayectoria calculada por el modelo:
+                   |ángulo| < 5°  → good (verde) — robot centrado
+                   5° – 20°       → warn (amarillo) — corrección leve
+                   > 20°          → bad (rojo) — corrección urgente
+
+  Barra de confianza:
+    Muestra la confianza de la predicción U-Net (0–100%).
+    Color dinámico según valor:
+      > 60% → verde
+      30–60% → amarillo
+      < 30% → rojo (el robot no actúa si confianza < 30%)
+
+────────────────────────────────────────────────────────────────────────────────
+
+4.4 D-PAD / CONTROL MANUAL
+────────────────────────────
+
+  Grid 3×3 con 5 botones activos:
+    [  ] [▲] [  ]
+    [◀] [STOP] [▶]
+    [  ] [▼] [  ]
+
+  Solo funciona cuando mode === 'manual'.
+  En modo automático el D-pad queda deshabilitado visualmente (.dpad-disabled).
+
+  Interacción:
+    Mousedown / touchstart → presiona botón, emite 'manual_cmd'
+    Mouseup / mouseleave / touchend → suelta botón, emite { x:0, y:0 }
+
+  Teclado (document keydown/keyup):
+    W / ↑     → arriba     (x:0,  y:1)
+    S / ↓     → abajo      (x:0,  y:-1)
+    A / ←     → izquierda  (x:-1, y:0)
+    D / →     → derecha    (x:1,  y:0)
+    Espacio   → stop       (x:0,  y:0)
+
+  dpadToVelocity(dir):
+    Convierte el nombre del botón a coordenadas de velocidad normalizada
+    que el backend interpreta para mover el robot.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+5. MAPA INTERACTIVO (panel derecho)
+================================================================================
+
+  Librería: Leaflet 1.9.4
+  Zoom inicial: 18 (vista de calle)
+  Controles nativos de Leaflet deshabilitados (se reemplazan por botones custom).
+
+  CAPAS DE TILES
+    Online:  OpenStreetMap ({s}.tile.openstreetmap.org)
+             maxZoom: 21, maxNativeZoom: 19
+    Offline: Capa custom (offlineGrid) que dibuja una cuadrícula oscura
+             con coordenadas de tile {z}/{x}/{y} usando Canvas HTML5.
+             Se activa automáticamente si el fetch de prueba a OpenStreetMap falla.
+
+  DETECCIÓN AUTOMÁTICA DE CONECTIVIDAD
+    Al cargar, se hace un fetch a tile.openstreetmap.org/favicon.ico.
+    Si responde → modo Online.
+    Si falla → modo Offline (cuadrícula canvas).
+    El botón en la esquina superior derecha del mapa permite cambiar manualmente.
+
+  MARCADOR DEL ROBOT
+    Icono SVG personalizado: círculo oscuro con borde verde y triángulo
+    apuntando hacia el norte (orientación del robot).
+    Se actualiza con robotMarker.setLatLng([lat, lon]) al recibir telemetría GPS.
+
+  TRAYECTORIA
+    Polilínea verde punteada que registra la ruta histórica del robot.
+    Se agrega un punto por cada dato GPS recibido.
+    Los primeros 2 puntos fuerzan un setView() para centrar la vista.
+
+  CONTROLES CUSTOM
+    [+] / [−]  (esquina inferior derecha) → zoom in / zoom out
+    [⊙ Centrar] (esquina inferior izquierda) → centra el mapa en el robot
+    [🌐 Online / 📴 Sin internet] (esquina superior derecha) → cambia modo de tiles
+
+--------------------------------------------------------------------------------
+
+================================================================================
+6. FOOTER — GPS Y PARADA DE EMERGENCIA
+================================================================================
+
+  BOTÓN "⛔ Parada de emergencia"
+    Altura completa del footer, fondo rojo oscuro.
+    Al presionar:
+      1. Emite 'emergency_stop' al backend
+      2. Llama stopMotors() → LED rojo, label "Motores detenidos"
+      3. Llama setMode('manual') → cambia a modo manual
+      4. Llama updateTelemetry({ speed:0, angle:0, conf:0 }) → limpia métricas
+      5. Muestra un alert al operador confirmando la acción
+
+  STRIP DE GPS (4 celdas)
+    Latitud   — float con 6 decimales (ej: 28.635300)
+    Longitud  — float con 6 decimales (ej: -106.088900)
+    Altitud   — float con 1 decimal + " m" (ej: 1430.0 m)
+    Fix GPS   — texto "OK" en verde cuando hay señal, "---" si no hay datos
+
+--------------------------------------------------------------------------------
+
+================================================================================
+7. PANEL DE ADMINISTRACIÓN
+================================================================================
+
+7.1 MODAL DE LOGIN
+───────────────────
+
+  Se abre con el botón "⚙ Admin" del header.
+  Muestra un overlay semitransparente con un modal centrado.
+  Campo de contraseña + botones Cancelar / Entrar.
+  Enter en el campo dispara verificarAdmin().
+
+  CONTRASEÑA
+    Definida en la constante JS: ADMIN_PASSWORD = 'grandroot2025'
+    IMPORTANTE: Cambiar antes de desplegar en producción.
+    La contraseña está en texto claro en el JS — no usar en entornos públicos.
+
+  Validación:
+    Correcta → cierra modal, abre panel técnico
+    Incorrecta → muestra "Contraseña incorrecta." por 2.5 segundos,
+                 limpia el campo, re-enfoca el input.
+
+────────────────────────────────────────────────────────────────────────────────
+
+7.2 TELEMETRÍA TÉCNICA DETALLADA
+──────────────────────────────────
+
+  Ventana flotante en la esquina superior derecha, visible solo cuando
+  el admin ha iniciado sesión.
+
+  Motor Izquierdo — 4 celdas:
+    Pulsos (pul_izq)   — encoders del último periodo
+    Ref    (ref_izq)   — setpoint de pulsos, en verde
+    Error  (err_izq)   — error de control, coloreado:
+                         |error| < 3  → verde
+                         3–8          → amarillo
+                         > 8          → rojo
+    DAC    (dac_izq)   — valor 0–255 del DAC, coloreado:
+                         DAC = 0      → sin clase (blanco)
+                         1–79         → warn (amarillo)
+                         80–220       → good (verde)
+                         > 220        → bad (rojo — saturación)
+
+  Motor Derecho — mismas 4 celdas con los mismos criterios de color.
+
+  Los valores se actualizan en cada evento 'telemetry' recibido del backend.
+  Si el panel no está abierto, la función updateTechPanel() retorna
+  inmediatamente para no desperdiciar ciclos.
+
+────────────────────────────────────────────────────────────────────────────────
+
+7.3 PARÁMETROS EDITABLES DEL CONTROLADOR PI
+─────────────────────────────────────────────
+
+  4 parámetros ajustables en tiempo real (sin reprogramar el ESP32):
+
+    Kp          — ganancia proporcional     (placeholder: 6.0)
+    Ki          — ganancia integral         (placeholder: 3.0)
+    Sample Time — periodo de muestreo en ms (placeholder: 200)
+    Pulsos Max  — velocidad máxima          (placeholder: 22)
+
+  Cada parámetro tiene:
+    - Input numérico con step configurado
+    - Botón "Aplicar" → llama enviarParam(nombre)
+    - Etiqueta "Actual: X" que muestra el valor confirmado por el ESP32
+
+  enviarParam(nombre):
+    1. Lee el valor del input
+    2. Valida: debe ser > 0 y no NaN
+    3. Emite 'set_param' → { param: nombre, value: val } al backend
+    4. Registra la acción en el log
+    5. Actualiza optimistamente el display "Actual" sin esperar confirmación
+
+  Los valores "Actual" se actualizan también automáticamente cuando
+  el backend los incluye en el evento 'telemetry' (campos kp, ki,
+  sample_ms, pulsos_max).
+
+────────────────────────────────────────────────────────────────────────────────
+
+7.4 TERMINAL DE LOG
+────────────────────
+
+  Ventana tipo terminal (fondo negro, fuente monospace) con 140 px de alto.
+  Máximo 120 líneas (las más antiguas se eliminan automáticamente).
+  Auto-scroll al fondo en cada nueva línea.
+
+  Tipos de línea (colores):
+    info  → azul   (#0a84ff) — mensajes del sistema
+    ok    → verde  (#00c896) — operaciones exitosas
+    warn  → amarillo (#ffb400) — advertencias
+    err   → rojo   (#ff3b30) — errores
+
+  Botón "Limpiar" → resetea el contenido con "[SISTEMA] Log limpiado."
+
+  Formato de línea: "HH:MM:SS  [CATEGORÍA] Mensaje"
+
+  Mensajes registrados actualmente:
+    "[ADMIN] Panel abierto."       — al abrir el panel admin
+    "[PARAM] X = Y → enviado"      — al enviar un parámetro
+    "[PARAM] Valor inválido para X" — si el input es incorrecto
+    "[PARAM] Sin conexión — no se envió" — si no hay socket
+
+--------------------------------------------------------------------------------
+
+================================================================================
+8. SISTEMA DE COMUNICACIÓN CON EL BACKEND
+================================================================================
+
+8.1 SOCKET.IO (conexión real)
+──────────────────────────────
+
+  La librería Socket.IO se carga dinámicamente desde /socket.io/socket.io.js.
+  Si el servidor está disponible, la carga es transparente.
+  Si falla (sin backend), se activa window.__NO_BACKEND = true.
+
+  connectBackend():
+    - Verifica que io() esté disponible
+    - Crea socket = io({ reconnection: true, reconnectionDelay: 2000 })
+    - Registra callbacks: connect, disconnect, telemetry
+    - Al conectar: badge → "CONECTADO" (verde), detiene simulación
+    - Al desconectar: badge → "DESCONECTADO" (rojo), reinicia simulación
+
+  Se llama desde window.addEventListener('load', ...) con un retraso de 500 ms
+  para asegurar que el DOM esté completamente listo.
+
+────────────────────────────────────────────────────────────────────────────────
+
+8.2 MODO SIMULACIÓN (sin backend)
+───────────────────────────────────
+
+  startSimulation():
+    Genera telemetría sintética cada 100 ms usando funciones trigonométricas.
+    Simula movimiento real del robot: posición GPS, velocidad, ángulo, confianza.
+    Después de 1.5 s activa el badge "SIMULACIÓN" (verde).
+
+    Variables simuladas:
+      speed    = 0.3 + sin(t) × 0.15         (oscila entre 0.15 y 0.45 m/s)
+      heading  = (t × 8) % 360               (gira progresivamente)
+      angle    = sin(t × 0.7) × 12           (oscila ±12°)
+      conf     = 0.55 + sin(t × 0.4) × 0.35 (oscila entre 0.2 y 0.9)
+      lat/lon  = coordenadas base + pequeños incrementos sinusoidales
+      alt      = 1430 m (fija)
+
+  stopSimulation():
+    Cancela el intervalo de simulación. Se llama al conectar al backend real.
+
+  La simulación se reactiva automáticamente si el socket se desconecta.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+9. FUNCIONES JAVASCRIPT PRINCIPALES
+================================================================================
+
+  updateClock()
+    Actualiza el reloj del header cada 1 segundo.
+    Formato: HH:MM:SS extraído de new Date().toTimeString().
+
+  setMode(m)
+    Cambia entre 'auto' y 'manual'.
+    Actualiza estilos, chip descriptivo, estado del D-pad.
+    Emite 'set_mode' al socket si está conectado.
+
+  startMotors() / stopMotors()
+    Cambia el LED y el label de estado.
+    Emite 'motor_cmd' al socket.
+
+  emergencyStop()
+    Detiene motores, cambia a manual, limpia métricas, emite 'emergency_stop'.
+
+  updateTelemetry({ speed, heading, angle, conf, lat, lon, alt })
+    Actualiza todas las métricas de la interfaz.
+    Todos los campos son opcionales (se actualiza solo lo que viene).
+    Mueve el marcador del mapa y agrega punto a la trayectoria si vienen GPS.
+
+  centerOnRobot()
+    Centra el mapa en la posición actual del marcador.
+
+  setMapMode(online) / toggleMapMode()
+    Cambia entre tiles de OSM (online) y cuadrícula canvas (offline).
+
+  onDpadDown(dir, btn) / onDpadUp(btn)
+    Maneja presión/soltura de botones del D-pad.
+    Solo activo en modo manual.
+
+  dpadToVelocity(dir)
+    Convierte nombre de dirección a { x, y } de velocidad normalizada.
+
+  abrirLogin() / cerrarLogin() / verificarAdmin()
+    Flujo del modal de autenticación admin.
+
+  abrirAdmin() / cerrarAdmin()
+    Muestra/oculta el panel técnico flotante.
+
+  updateTechPanel(data)
+    Actualiza telemetría técnica y parámetros en el panel admin.
+    Solo ejecuta si adminAbierto === true.
+
+  setTelVal(id, val, tipo)
+    Actualiza un elemento de telemetría con el valor y aplica coloración
+    según el tipo ('dac', 'error', o ninguno).
+
+  enviarParam(nombre)
+    Lee, valida y envía un parámetro del controlador al backend.
+
+  adminLog(tipo, mensaje)
+    Agrega una línea al terminal del panel admin con timestamp.
+
+  limpiarLog()
+    Limpia el terminal del log.
+
+  startSimulation() / stopSimulation()
+    Inicia/detiene la simulación de telemetría para modo sin backend.
+
+  connectBackend()
+    Inicializa Socket.IO y registra callbacks de conexión/datos.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+10. EVENTOS EMITIDOS HACIA EL BACKEND (socket.emit)
+================================================================================
+
+  'set_mode'        { mode: 'auto' | 'manual' }
+    Notifica al backend el cambio de modo de operación.
+    El backend debe activar/desactivar el pipeline de visión U-Net.
+
+  'motor_cmd'       { action: 'start' | 'stop' }
+    Solicita activar o detener los motores.
+    El backend envía ENABLE,true / ENABLE,false al ESP32.
+
+  'emergency_stop'  (sin payload)
+    Para inmediata de todos los sistemas.
+    El backend debe enviar ENABLE,false + DAC=0 al ESP32.
+
+  'manual_cmd'      { x: float, y: float }
+    Comando de movimiento manual.
+    x e y en rango [-1, 1].
+    El backend convierte esto a MOVE,vx,vy para el ESP32.
+    Se emite en cada keydown/mousedown y { x:0, y:0 } al soltar.
+
+  'set_param'       { param: string, value: float }
+    Actualiza un parámetro del controlador PI en tiempo de ejecución.
+    param: 'kp' | 'ki' | 'sample_ms' | 'pulsos_max'
+    El backend debe reenviar esto al ESP32 o actualizar sus variables.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+11. EVENTOS RECIBIDOS DESDE EL BACKEND (socket.on)
+================================================================================
+
+  'connect'
+    Socket.IO conectado. Detiene simulación, activa badge verde.
+
+  'disconnect'
+    Conexión perdida. Reactiva simulación, badge rojo.
+
+  'telemetry'   data: objeto con campos opcionales:
+    speed       float    velocidad lineal en m/s
+    heading     float    rumbo en grados (0–360)
+    angle       float    ángulo de desviación U-Net en grados
+    conf        float    confianza de predicción U-Net (0.0–1.0)
+    lat         float    latitud GPS
+    lon         float    longitud GPS
+    alt         float    altitud en metros
+    motor_pi    int      pulsos encoder izquierdo
+    motor_ri    int      referencia motor izquierdo
+    motor_ei    float    error motor izquierdo
+    motor_daci  int      DAC motor izquierdo (0–255)
+    motor_pd    int      pulsos encoder derecho
+    motor_rd    int      referencia motor derecho
+    motor_ed    float    error motor derecho
+    motor_dacd  int      DAC motor derecho (0–255)
+    kp          float    ganancia Kp activa en el ESP32
+    ki          float    ganancia Ki activa en el ESP32
+    sample_ms   int      periodo de muestreo activo
+    pulsos_max  int      velocidad máxima activa
+
+    Todos los campos son opcionales. El dashboard actualiza solo lo que recibe.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+12. CONSIDERACIONES DE SEGURIDAD
+================================================================================
+
+  CONTRASEÑA ADMIN EN TEXTO CLARO
+    La constante ADMIN_PASSWORD = 'grandroot2025' está visible en el código
+    fuente del HTML. Cualquier persona con acceso al dashboard puede verla
+    con las herramientas de desarrollador del navegador.
+    Recomendación: mover la validación al backend y usar una sesión server-side
+    antes de desplegar en una red accesible.
+
+  SIN HTTPS
+    El dashboard asume HTTP sin cifrado. En redes WiFi abiertas, los comandos
+    (incluyendo emergency_stop y manual_cmd) pueden ser interceptados.
+
+  PARADA DE EMERGENCIA FÍSICA RECOMENDADA
+    La parada de emergencia del dashboard es software. Para operación real
+    en campo, implementar también un paro físico (botón hardware o relé)
+    independiente de la conectividad WiFi.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+13. RELACIÓN CON OTRAS BRANCHES
+================================================================================
+
+Branch Interfaz (este módulo) → Branch Pruebas
+  grandroot_dashboard.html se conecta al backend que corre junto con
+  Control_PID_RBPI.ino (ESP32) + grandroot_bridge.py (Raspberry Pi).
+
+  Flujo completo:
+    grandroot_dashboard.html  (navegador del operador)
+        ↕ Socket.IO (WiFi / LAN)
+    Backend Flask-SocketIO     (Raspberry Pi — a implementar)
+        ↕ WebSocket ws://192.168.4.1/ws  ← grandroot_bridge.py
+    Control_PID_RBPI.ino       (ESP32)
+        ↕ DAC / GPIO
+    Drivers WS55-220 → Motores BLDC
+
+Branch Interfaz → Branch Navegacion
+  El evento 'telemetry' que actualiza el campo 'angle' y 'conf' proviene
+  del pipeline de visión (camara_tiempo_real.py / robot_vision_serial.py).
+  El backend debe integrar ambos flujos (control de motores + visión) y
+  publicarlos como un único evento 'telemetry' al dashboard.
+
+Branch Interfaz → Branch Control
+  Los eventos 'set_param' (kp, ki, sample_ms, pulsos_max) corresponden
+  a los parámetros del controlador PI documentados en esa branch.
+  El backend debe traducir estos eventos a comandos Serial hacia el ESP32.
+
+BACKEND NECESARIO (no incluido en esta branch, a desarrollar)
+  Para que el dashboard funcione con hardware real se necesita un servidor
+  Python con:
+    - Flask-SocketIO (para recibir/emitir eventos del navegador)
+    - Integración con grandroot_bridge.py (comunicación con ESP32)
+    - Integración con el pipeline de visión (ángulo, confianza)
+    - Integración con GPS (datos lat/lon/alt/fix)
+
+================================================================================
+  Fin de documentación — GrandRoot Interfaz
+  Generado con base en análisis del código fuente HTML/CSS/JS.
+================================================================================
