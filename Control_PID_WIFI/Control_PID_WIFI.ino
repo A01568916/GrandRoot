@@ -11,16 +11,18 @@
  * IP del ESP32:    192.168.4.1
  * WebSocket:       ws://192.168.4.1/ws
  *
- * Comandos WebSocket (idénticos al protocolo Serial original):
+ * Comandos WebSocket:
  *   → ENABLE,true / ENABLE,false
  *   → MOVE,vx,vy
+ *   → PARAM,nombre,valor   (ajuste en tiempo real desde panel admin)
  *   ← TEL,pi,pd,ri,rd,ei,ed,daci,dacd   (cada SAMPLE_MS ms)
  *
- * FIXES aplicados (heredados del original):
+ * FIXES aplicados:
  *  1. Referencia mínima en giros  → evita alarma del driver
  *  2. Anti-windup correcto        → integral limitada a 255/ki
  *  3. fabsf solo al DAC final     → integral correcta en reversa
  *  4. Feedforward zona muerta     → arranque seguro con ref baja
+ *  5. Reset integral/DAC al soltar flecha (ref=0) → evita arranque brusco
  */
 
 // =====================================================
@@ -66,11 +68,12 @@ AsyncWebSocket ws("/ws");
 #define ENC_DER        34
 
 // =====================================================
-// PARÁMETROS
+// PARÁMETROS (modificables en tiempo real vía PARAM,)
 // =====================================================
 
 #define SAMPLE_MS   200
-#define PULSOS_MAX  22
+
+int   PULSOS_MAX      = 22;
 
 // =====================================================
 // CINEMÁTICA
@@ -79,10 +82,10 @@ AsyncWebSocket ws("/ws");
 const float R_RUEDA = 0.1397f;
 const float L_BASE  = 1.12f;
 
-const float VMAX = 4.0f;
-const float WMAX = 2.0f;
+float VMAX = 4.0f;
+float WMAX = 2.0f;
 
-const float OMEGA_MAX = VMAX / R_RUEDA;
+float OMEGA_MAX = VMAX / R_RUEDA;   // Se recalcula si cambia VMAX
 
 // =====================================================
 // PI POSICIONAL
@@ -91,9 +94,9 @@ const float OMEGA_MAX = VMAX / R_RUEDA;
 float kp = 6.0f;
 float ki = 3.0f;
 
-const float INTEGRAL_MAX    = 255.0f / 3.0f;  // Anti-windup FIX 2
-const int   REF_MIN_GIRO    = 10;              // Ref. mínima FIX 1
-const int   DAC_MIN_ARRANQUE = 60;             // Feedforward FIX 4
+float INTEGRAL_MAX    = 255.0f / 3.0f;  // Anti-windup — se recalcula si cambia ki
+int   REF_MIN_GIRO    = 10;             // Ref. mínima FIX 1
+int   DAC_MIN_ARRANQUE = 60;            // Feedforward FIX 4
 
 // =====================================================
 // ENCODERS
@@ -131,6 +134,17 @@ MotorState motor_d = { 0, 0, 0.0f, 0.0f, 0.0f, 0 };
 bool motors_enabled = false;
 
 unsigned long t_prev = 0;
+
+// =====================================================
+// RESET DE ESTADO DE UN MOTOR
+// =====================================================
+
+void resetMotor(MotorState &m) {
+  m.integral = 0.0f;
+  m.u        = 0.0f;
+  m.error    = 0.0f;
+  m.dac      = 0;
+}
 
 // =====================================================
 // DIRECCIÓN MOTORES
@@ -187,13 +201,11 @@ void aplicarMotores(int ri, int rd) {
 
   if (dir_izq != dir_actual_izq) {
     dacWrite(SV_SIGNAL_IZQ, 0);
-    motor_i.integral = 0;
-    motor_i.u        = 0;
+    resetMotor(motor_i);
   }
   if (dir_der != dir_actual_der) {
     dacWrite(SV_SIGNAL_DER, 0);
-    motor_d.integral = 0;
-    motor_d.u        = 0;
+    resetMotor(motor_d);
   }
 
   setDirIzq(dir_izq);
@@ -201,6 +213,18 @@ void aplicarMotores(int ri, int rd) {
 
   dir_actual_izq = dir_izq;
   dir_actual_der = dir_der;
+
+  // FIX 5 — Al soltar la flecha (ref→0) limpiamos estado acumulado
+  // Esto evita que la integral cargada durante una alarma genere un
+  // arranque brusco en el siguiente comando de movimiento.
+  if (ri == 0) {
+    dacWrite(SV_SIGNAL_IZQ, 0);
+    resetMotor(motor_i);
+  }
+  if (rd == 0) {
+    dacWrite(SV_SIGNAL_DER, 0);
+    resetMotor(motor_d);
+  }
 
   motor_i.ref = ri;
   motor_d.ref = rd;
@@ -222,10 +246,8 @@ void enableMotores(bool on) {
     dacWrite(SV_SIGNAL_DER, 0);
     pinMode(EN_IZQ, INPUT);
     pinMode(EN_DER, INPUT);
-    motor_i.integral = 0;
-    motor_i.u        = 0;
-    motor_d.integral = 0;
-    motor_d.u        = 0;
+    resetMotor(motor_i);
+    resetMotor(motor_d);
   }
 
   motors_enabled = on;
@@ -237,6 +259,12 @@ void enableMotores(bool on) {
 
 void stepPI(MotorState &m, float T) {
 
+  // FIX 5 — Si ref es 0 no hay nada que controlar; salimos limpio
+  if (m.ref == 0) {
+    resetMotor(m);
+    return;
+  }
+
   m.error    = (float)m.ref - (float)m.medida;
   m.integral += m.error * T;
   m.integral  = constrain(m.integral, -INTEGRAL_MAX, INTEGRAL_MAX); // FIX 2
@@ -246,16 +274,47 @@ void stepPI(MotorState &m, float T) {
   m.u = constrain(m.u, 0.0f, 255.0f);
 
   // FIX 4 — Feedforward zona muerta
-  if (m.ref != 0) {
-    m.dac = (int)constrain(m.u + DAC_MIN_ARRANQUE,
-                           (float)DAC_MIN_ARRANQUE, 255.0f);
-  } else {
-    m.dac = 0;
-  }
+  m.dac = (int)constrain(m.u + DAC_MIN_ARRANQUE,
+                         (float)DAC_MIN_ARRANQUE, 255.0f);
 }
 
 // =====================================================
-// PROCESAR COMANDO  (idéntico al original)
+// PROCESAR PARÁMETRO  PARAM,nombre,valor
+// =====================================================
+
+void procesarParam(String cmd) {
+  // cmd llega sin el prefijo "PARAM,"
+  int sep = cmd.indexOf(',');
+  if (sep < 0) return;
+
+  String nombre = cmd.substring(0, sep);
+  float  valor  = cmd.substring(sep + 1).toFloat();
+
+  nombre.toLowerCase();
+
+  if      (nombre == "pulsos_max")       { PULSOS_MAX       = (int)valor; }
+  else if (nombre == "vmax")             { VMAX             = valor;
+                                           OMEGA_MAX        = VMAX / R_RUEDA; }
+  else if (nombre == "wmax")             { WMAX             = valor; }
+  else if (nombre == "kp")              { kp               = valor; }
+  else if (nombre == "ki")              { ki               = valor;
+                                           INTEGRAL_MAX     = 255.0f / ki; }
+  else if (nombre == "ref_min_gir")     { REF_MIN_GIRO     = (int)valor; }
+  else if (nombre == "dac_min_arranque"){ DAC_MIN_ARRANQUE = (int)valor; }
+  else {
+    Serial.printf("[PARAM] Nombre desconocido: %s\n", nombre.c_str());
+    return;
+  }
+
+  Serial.printf("[PARAM] %s = %.4f\n", nombre.c_str(), valor);
+
+  // Eco de confirmación al cliente
+  String resp = "PARAM_OK," + nombre + "," + String(valor, 4);
+  ws.textAll(resp);
+}
+
+// =====================================================
+// PROCESAR COMANDO
 // =====================================================
 
 void procesarComando(String cmd) {
@@ -266,7 +325,6 @@ void procesarComando(String cmd) {
   if (cmd.startsWith("ENABLE,")) {
     bool on = (cmd.substring(7) == "true");
     enableMotores(on);
-    // Respuesta de confirmación (broadcast a todos los clientes)
     String resp = "ENABLE,";
     resp += (on ? "true" : "false");
     ws.textAll(resp);
@@ -286,6 +344,11 @@ void procesarComando(String cmd) {
     cinematica(vx, vy, ri, rd);
     aplicarMotores(ri, rd);
   }
+
+  // PARAM,nombre,valor
+  else if (cmd.startsWith("PARAM,")) {
+    procesarParam(cmd.substring(6));
+  }
 }
 
 // =====================================================
@@ -302,7 +365,6 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
 
   } else if (type == WS_EVT_DISCONNECT) {
     Serial.printf("[WS] Cliente #%u desconectado\n", client->id());
-    // Si no quedan clientes, apagamos motores por seguridad
     if (ws.count() == 0) {
       enableMotores(false);
       Serial.println("[WS] Sin clientes — motores desactivados");
@@ -310,7 +372,6 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
 
   } else if (type == WS_EVT_DATA) {
     AwsFrameInfo *info = (AwsFrameInfo *)arg;
-    // Solo procesamos frames de texto completos
     if (info->final && info->index == 0 && info->len == len
         && info->opcode == WS_TEXT) {
       String msg = "";
@@ -347,13 +408,13 @@ void setup() {
   // — WiFi Access Point —
   WiFi.softAP(AP_SSID, AP_PASSWORD);
   Serial.print("[WiFi] AP iniciado — IP: ");
-  Serial.println(WiFi.softAPIP());   // Siempre 192.168.4.1
+  Serial.println(WiFi.softAPIP());
 
   // — WebSocket —
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
 
-  // — Servidor HTTP — sirve la página embebida en index_html.h —
+  // — Servidor HTTP —
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/html", INDEX_HTML);
   });
@@ -370,7 +431,6 @@ void setup() {
 
 void loop() {
 
-  // Limpieza periódica de clientes WS desconectados
   ws.cleanupClients();
 
   unsigned long ahora = millis();
@@ -406,7 +466,6 @@ void loop() {
     }
 
     // — Telemetría por WebSocket —
-    // Solo enviamos si hay al menos un cliente conectado
     if (ws.count() > 0) {
       char buf[80];
       snprintf(buf, sizeof(buf),
@@ -418,7 +477,6 @@ void loop() {
       ws.textAll(buf);
     }
 
-    // Debug por Serial (opcional, puedes comentar esta sección)
     Serial.printf("TEL,%ld,%ld,%d,%d,%.1f,%.1f,%d,%d\n",
                   motor_i.medida, motor_d.medida,
                   motor_i.ref,    motor_d.ref,

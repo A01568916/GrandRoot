@@ -1,6 +1,5 @@
 // index_html.h
 // Página web embebida — Control PID WiFi (AP mode)
-// Generada automáticamente — no editar manualmente el string raw
 // La comunicación Serial fue reemplazada por WebSocket ws://192.168.4.1/ws
 
 #pragma once
@@ -26,6 +25,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 --green:#3fb950;
 --red:#f85149;
 --orange:#f0883e;
+--purple:#a371f7;
 --text:#e6edf3;
 --muted:#8b949e
 }
@@ -60,7 +60,6 @@ main{flex:1;padding:20px;display:grid;grid-template-columns:280px 1fr;gap:16px}
 .tele-item.ref{border-left-color:#a371f7}
 .tele-lbl{font-size:10px;color:var(--muted);margin-bottom:3px}
 .tele-val{font-size:22px;font-weight:700}
-.ref-section{display:flex;flex-direction:column;align-items:center;gap:20px;padding:20px}
 .dir-pad{display:grid;grid-template-columns:56px 56px 56px;grid-template-rows:56px 56px 56px;gap:6px;margin:20px auto}
 .dir-btn{background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:24px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.1s;user-select:none}
 .dir-btn:active,.dir-btn.pressed{background:var(--accent);color:#0d1117}
@@ -73,11 +72,61 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .chart-card .ch-header{display:flex;align-items:center;gap:9px;margin-bottom:14px}
 .chart-card .ch-title{font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--muted);text-transform:uppercase}
 .chart-card canvas{max-height:140px}
-/* Botón WiFi reemplaza al Serial */
 .wifi-btn{width:100%;padding:12px;border:none;border-radius:8px;background:var(--accent);color:#0d1117;font-weight:800;font-size:13px;cursor:pointer;margin-bottom:6px}
 .wifi-btn:hover{background:#79c0ff}
 .wifi-btn:disabled{background:#21262d;color:var(--muted);cursor:not-allowed}
 .ws-info{font-size:11px;color:var(--muted);text-align:center;margin-top:4px}
+
+/* ——— Botón Admin ——— */
+.btn-admin{
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  width:100%;padding:10px;margin-top:8px;
+  border:1px solid var(--purple);border-radius:8px;
+  background:transparent;color:var(--purple);
+  font-weight:700;font-size:13px;cursor:pointer;transition:.15s;
+}
+.btn-admin:hover{background:rgba(163,113,247,.15)}
+
+/* ——— Modal Admin ——— */
+.modal-overlay{
+  display:none;position:fixed;inset:0;z-index:9000;
+  background:rgba(0,0,0,.7);backdrop-filter:blur(4px);
+  align-items:center;justify-content:center;
+}
+.modal-overlay.open{display:flex}
+.modal{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:14px;padding:24px;width:min(480px,95vw);
+  max-height:90vh;overflow-y:auto;
+  box-shadow:0 8px 40px rgba(0,0,0,.6);
+}
+.modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.modal-title{font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px;color:var(--purple)}
+.modal-close{background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1;padding:2px 6px;border-radius:4px}
+.modal-close:hover{color:var(--text);background:var(--surface2)}
+.param-group{display:flex;flex-direction:column;gap:14px}
+.param-row{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:8px;
+  background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px}
+.param-label{font-size:12px;font-weight:700;color:var(--text)}
+.param-sub{font-size:10px;color:var(--muted);margin-top:2px}
+.param-input{
+  width:90px;background:var(--bg);border:1px solid var(--border);
+  border-radius:6px;color:var(--text);font-size:14px;font-weight:700;
+  padding:6px 8px;text-align:right;outline:none;
+}
+.param-input:focus{border-color:var(--accent)}
+.param-send{
+  background:var(--accent);color:#0d1117;border:none;border-radius:6px;
+  font-size:12px;font-weight:800;padding:7px 12px;cursor:pointer;
+  white-space:nowrap;transition:.1s;
+}
+.param-send:hover{background:#79c0ff}
+.param-send.ok{background:var(--green)!important;color:#fff}
+.param-send.err{background:var(--red)!important;color:#fff}
+.modal-footer{margin-top:20px;display:flex;justify-content:flex-end}
+.btn-close-modal{padding:10px 22px;border:1px solid var(--border);border-radius:8px;
+  background:transparent;color:var(--muted);font-size:13px;font-weight:700;cursor:pointer}
+.btn-close-modal:hover{color:var(--text);border-color:var(--text)}
 </style>
 </head>
 <body>
@@ -108,6 +157,10 @@ input[type=range]{flex:1;accent-color:var(--accent)}
     <i class="bi bi-plug"></i> DESCONECTAR
   </button>
   <div class="ws-info">Conéctate primero a la red <b>ESP32-Robot</b></div>
+  <!-- Botón Admin -->
+  <button class="btn-admin" onclick="abrirAdmin()">
+    <i class="bi bi-sliders"></i> PANEL ADMIN
+  </button>
 </div>
 
 <div class="card">
@@ -238,9 +291,94 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 </div>
 </div>
 
+<!-- =====================================================
+     MODAL ADMIN
+     ===================================================== -->
+<div class="modal-overlay" id="adminModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">
+        <i class="bi bi-sliders"></i> Panel de Administrador
+      </div>
+      <button class="modal-close" onclick="cerrarAdmin()">×</button>
+    </div>
+
+    <div class="param-group">
+
+      <div class="param-row">
+        <div>
+          <div class="param-label">Pulsos Max</div>
+          <div class="param-sub">Escala de referencia (PULSOS_MAX)</div>
+        </div>
+        <input class="param-input" id="p_pulsos_max" type="number" step="1" min="1" value="22">
+        <button class="param-send" onclick="enviarParam('PULSOS_MAX', 'p_pulsos_max', this)">Aplicar</button>
+      </div>
+
+      <div class="param-row">
+        <div>
+          <div class="param-label">VMAX (m/s)</div>
+          <div class="param-sub">Velocidad lineal máxima</div>
+        </div>
+        <input class="param-input" id="p_vmax" type="number" step="0.1" min="0.1" value="4.0">
+        <button class="param-send" onclick="enviarParam('VMAX', 'p_vmax', this)">Aplicar</button>
+      </div>
+
+      <div class="param-row">
+        <div>
+          <div class="param-label">WMAX (rad/s)</div>
+          <div class="param-sub">Velocidad angular máxima</div>
+        </div>
+        <input class="param-input" id="p_wmax" type="number" step="0.1" min="0.1" value="2.0">
+        <button class="param-send" onclick="enviarParam('WMAX', 'p_wmax', this)">Aplicar</button>
+      </div>
+
+      <div class="param-row">
+        <div>
+          <div class="param-label">Kp</div>
+          <div class="param-sub">Ganancia proporcional</div>
+        </div>
+        <input class="param-input" id="p_kp" type="number" step="0.5" min="0" value="6.0">
+        <button class="param-send" onclick="enviarParam('Kp', 'p_kp', this)">Aplicar</button>
+      </div>
+
+      <div class="param-row">
+        <div>
+          <div class="param-label">Ki</div>
+          <div class="param-sub">Ganancia integral (actualiza anti-windup)</div>
+        </div>
+        <input class="param-input" id="p_ki" type="number" step="0.5" min="0" value="3.0">
+        <button class="param-send" onclick="enviarParam('Ki', 'p_ki', this)">Aplicar</button>
+      </div>
+
+      <div class="param-row">
+        <div>
+          <div class="param-label">Ref Min Giro</div>
+          <div class="param-sub">Referencia mínima en giros (pulsos)</div>
+        </div>
+        <input class="param-input" id="p_ref_min_gir" type="number" step="1" min="0" value="10">
+        <button class="param-send" onclick="enviarParam('ref_min_gir', 'p_ref_min_gir', this)">Aplicar</button>
+      </div>
+
+      <div class="param-row">
+        <div>
+          <div class="param-label">DAC Min Arranque</div>
+          <div class="param-sub">Feedforward zona muerta (0–255)</div>
+        </div>
+        <input class="param-input" id="p_dac_min" type="number" step="1" min="0" max="255" value="60">
+        <button class="param-send" onclick="enviarParam('dac_min_arranque', 'p_dac_min', this)">Aplicar</button>
+      </div>
+
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-close-modal" onclick="cerrarAdmin()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // =====================================================
-// WEBSOCKET  (reemplaza toda la lógica Serial)
+// WEBSOCKET
 // =====================================================
 
 let ws = null;
@@ -256,7 +394,6 @@ function setWsUI(conectado) {
 }
 
 function connectWS() {
-  // Si ya hay una conexión abierta no hacemos nada
   if (ws && ws.readyState === WebSocket.OPEN) return;
 
   ws = new WebSocket('ws://192.168.4.1/ws');
@@ -269,7 +406,6 @@ function connectWS() {
   ws.onclose = () => {
     setWsUI(false);
     ws = null;
-    // Intento de reconexión automática cada 3 s si el usuario no desconectó
     if (motoresActivos) {
       wsReconnectTimer = setTimeout(connectWS, 3000);
     }
@@ -279,7 +415,6 @@ function connectWS() {
     console.error('WS error', e);
   };
 
-  // Mensajes entrantes — mismo formato que antes: TEL,pi,pd,ri,rd,ei,ed,daci,dacd
   ws.onmessage = (evt) => {
     parseMensaje(evt.data);
   };
@@ -288,7 +423,6 @@ function connectWS() {
 function disconnectWS() {
   clearTimeout(wsReconnectTimer);
   if (ws) {
-    // Apagar motores antes de cerrar
     sendMsg('ENABLE,false');
     ws.close();
     ws = null;
@@ -300,7 +434,6 @@ function disconnectWS() {
   motoresActivos = false;
 }
 
-// Enviar texto al ESP32 por WebSocket
 function sendMsg(txt) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(txt + '\n');
@@ -308,16 +441,20 @@ function sendMsg(txt) {
 }
 
 // =====================================================
-// PARSER  (idéntico al parseSerial original, pero
-// recibe el string ya completo — WebSocket garantiza
-// frames enteros, no hace falta buffer de líneas)
+// PARSER MENSAJES
 // =====================================================
 
 function parseMensaje(data) {
-  // Por si acaso llegan varias líneas en un frame
   const lines = data.split('\n');
   lines.forEach(line => {
     line = line.trim();
+
+    // Confirmación de parámetro
+    if (line.startsWith('PARAM_OK,')) {
+      console.log('[Admin]', line);
+      return;
+    }
+
     if (!line.startsWith('TEL,')) return;
     const p = line.split(',');
     if (p.length < 9) return;
@@ -350,7 +487,7 @@ function parseMensaje(data) {
 }
 
 // =====================================================
-// CONTROL  (idéntico al original, solo cambia sendSerial→sendMsg)
+// CONTROL DIRECCIÓN
 // =====================================================
 
 let dpadState = { up:false, down:false, left:false, right:false };
@@ -417,7 +554,44 @@ document.addEventListener('keyup', e => {
 });
 
 // =====================================================
-// GRÁFICAS  (sin cambios)
+// PANEL ADMIN
+// =====================================================
+
+function abrirAdmin() {
+  document.getElementById('adminModal').classList.add('open');
+}
+
+function cerrarAdmin() {
+  document.getElementById('adminModal').classList.remove('open');
+}
+
+// Cerrar al hacer click fuera del modal
+document.getElementById('adminModal').addEventListener('click', function(e) {
+  if (e.target === this) cerrarAdmin();
+});
+
+function enviarParam(nombre, inputId, btn) {
+  const val = parseFloat(document.getElementById(inputId).value);
+  if (isNaN(val)) {
+    flashBtn(btn, 'err');
+    return;
+  }
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    flashBtn(btn, 'err');
+    alert('No hay conexión WebSocket activa.');
+    return;
+  }
+  sendMsg(`PARAM,${nombre},${val}`);
+  flashBtn(btn, 'ok');
+}
+
+function flashBtn(btn, cls) {
+  btn.classList.add(cls);
+  setTimeout(() => btn.classList.remove(cls), 1200);
+}
+
+// =====================================================
+// GRÁFICAS
 // =====================================================
 
 const BUFFER = 150;
