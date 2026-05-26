@@ -83,7 +83,7 @@ const float R_RUEDA = 0.1397f;
 const float L_BASE  = 1.12f;
 
 float VMAX = 4.0f;
-float WMAX = 2.0f;
+float WMAX = 7.4f;
 
 float OMEGA_MAX = VMAX / R_RUEDA;   // Se recalcula si cambia VMAX
 
@@ -165,7 +165,7 @@ void setDirDer(bool adelante) {
 void cinematica(float vx, float vy, int &ref_izq, int &ref_der) {
 
   float V = vx * VMAX;
-  float w = -vy * WMAX;
+  float w = vy * WMAX;
 
   float omega_r = V / R_RUEDA + (L_BASE / (2.0f * R_RUEDA)) * w;
   float omega_l = V / R_RUEDA - (L_BASE / (2.0f * R_RUEDA)) * w;
