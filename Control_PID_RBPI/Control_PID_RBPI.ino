@@ -39,7 +39,7 @@ void stepPI(MotorState &m, float T);
 #define EN_IZQ         21
 #define EN_DER         33
 
-#define ENC_IZQ        32
+#define ENC_IZQ        18
 #define ENC_DER        34
 
 // =====================================================
@@ -57,7 +57,7 @@ const float R_RUEDA = 0.1397f;
 const float L_BASE  = 1.12f;
 
 const float VMAX = 4.0f;
-const float WMAX = 2.0f;
+const float WMAX = 7.4f;
 
 const float OMEGA_MAX = VMAX / R_RUEDA;
 
@@ -69,8 +69,8 @@ float kp = 6.0f;
 float ki = 3.0f;
 
 const float INTEGRAL_MAX     = 255.0f / 3.0f;  // Anti-windup FIX 2
-const int   REF_MIN_GIRO     = 10;              // Ref. mínima FIX 1
-const int   DAC_MIN_ARRANQUE = 60;              // Feedforward FIX 4
+const int   REF_MIN_GIRO     = 3;              // Ref. mínima FIX 1
+const int   DAC_MIN_ARRANQUE = 70;              // Feedforward FIX 4
 
 // =====================================================
 // ENCODERS
@@ -134,7 +134,7 @@ void setDirDer(bool adelante) {
 void cinematica(float vx, float vy, int &ref_izq, int &ref_der) {
 
   float V = vx * VMAX;
-  float w = -vy * WMAX;
+  float w = vy * WMAX;
 
   float omega_r = V / R_RUEDA + (L_BASE / (2.0f * R_RUEDA)) * w;
   float omega_l = V / R_RUEDA - (L_BASE / (2.0f * R_RUEDA)) * w;

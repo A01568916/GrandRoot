@@ -95,8 +95,8 @@ float kp = 6.0f;
 float ki = 3.0f;
 
 float INTEGRAL_MAX    = 255.0f / 3.0f;  // Anti-windup — se recalcula si cambia ki
-int   REF_MIN_GIRO    = 10;             // Ref. mínima FIX 1
-int   DAC_MIN_ARRANQUE = 60;            // Feedforward FIX 4
+int   REF_MIN_GIRO    = 3;             // Ref. mínima FIX 1
+int   DAC_MIN_ARRANQUE = 70;            // Feedforward FIX 4
 
 // =====================================================
 // ENCODERS
