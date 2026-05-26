@@ -68,8 +68,8 @@ log = logging.getLogger("grandroot")
 
 # Puertos USB de los ESP32
 # Para identificarlos: ls /dev/ttyUSB*  (conecta uno a la vez si no sabes cual es cual)
-PORT_SENSORES = "/dev/ttyUSB0"   # ESP32 que tiene GPS + IMU
-PORT_MOTORES  = "/dev/ttyUSB1"   # ESP32 que tiene los drivers
+PORT_SENSORES = "/dev/ttyUSB1"   # ESP32 que tiene GPS + IMU
+PORT_MOTORES  = "/dev/ttyESP32"   # ESP32 que tiene los drivers
 
 BAUD_RATE     = 115200           # mismo baud en ambos ESP32
 
@@ -80,7 +80,7 @@ MODEL_PATH = os.path.join(os.path.dirname(__file__), "modelo_final.h5")
 CAMERA_INDEX = 0
 
 # Umbral de angulo en grados: si |angulo| < ANGLE_UMBRAL → ir recto
-ANGLE_UMBRAL = 3.0
+ANGLE_UMBRAL = 5.0
 
 # Confianza minima para considerar que la linea es valida
 CONF_MIN = 0.30
@@ -102,7 +102,7 @@ IMG_SIZE = (128, 128)
 
 # Intervalo de timeout: si no llegan datos del ESP32 de sensores
 # en este tiempo, se registra una advertencia
-SENSOR_TIMEOUT_S = 2.0
+SENSOR_TIMEOUT_S = 5.0
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ESTADO COMPARTIDO ENTRE HILOS

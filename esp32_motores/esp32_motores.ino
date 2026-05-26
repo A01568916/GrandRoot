@@ -1,34 +1,34 @@
 /*
  ╔══════════════════════════════════════════════════════════════════════════════╗
  ║  GrandRoot — ESP32 MOTORES                                                   ║
- ║  Recibe comandos JSON por USB-Serial desde la Raspberry Pi                  ║
- ║  Controla dos motores DC con control PI posicional + encoders               ║
+ ║  Recibe comandos JSON por USB-Serial desde la Raspberry Pi                   ║
+ ║  Controla dos motores DC con control PI posicional + encoders                ║
  ║                                                                              ║
  ║  PINOUT (segun tu tabla):                                                    ║
  ║    Driver Derecho:                                                           ║
- ║      D27 → FR_Derecha      (direccion motor derecho)                        ║
- ║      D26 → SV_Driver_DER   (señal de velocidad, DAC)                        ║
- ║      D33 → Enable_Derecha  (habilitar driver)                               ║
- ║      D34 → PG_DER_IN       (encoder motor derecho, INPUT ONLY)              ║fr
+ ║      D27 → FR_Derecha      (direccion motor derecho)                         ║
+ ║      D26 → SV_Driver_DER   (señal de velocidad, DAC)                         ║
+ ║      D33 → Enable_Derecha  (habilitar driver)                                ║
+ ║      D34 → PG_DER_IN       (encoder motor derecho, INPUT ONLY)               ║
  ║                                                                              ║
  ║    Driver Izquierdo:                                                         ║
- ║      D21 → Enable_Izquierda (habilitar driver)                              ║
- ║      D14 → FR_Izquierda     (direccion motor izquierdo)                     ║
- ║      D25 → SV_Driver_IZQ    (señal de velocidad, DAC)                       ║
- ║      D32 → PG_IZQ_IN        (encoder motor izquierdo)                       ║
+ ║      D21 → Enable_Izquierda (habilitar driver)                               ║
+ ║      D14 → FR_Izquierda     (direccion motor izquierdo)                      ║
+ ║      D25 → SV_Driver_IZQ    (señal de velocidad, DAC)                        ║
+ ║      D18 → PG_IZQ_IN        (encoder motor izquierdo)                        ║
  ║                                                                              ║
- ║  Nota sobre D34: es INPUT ONLY en el ESP32, no tiene pull-up interno.       ║
- ║  Usa resistencia pull-up externa de 10k si el encoder la necesita.          ║
+ ║  Nota sobre D34: es INPUT ONLY en el ESP32, no tiene pull-up interno.        ║
+ ║  Usa resistencia pull-up externa de 10k si el encoder la necesita.           ║
  ║                                                                              ║
- ║  Comandos JSON que acepta (un objeto por linea terminado en \n):            ║
- ║    {"cmd":"ENABLE","val":true}          — habilitar / deshabilitar motores  ║
- ║    {"cmd":"MOVE","vx":1.0,"vy":0.0}    — mover (vx: adelante, vy: giro)    ║
- ║    {"cmd":"STOP"}                       — parada inmediata                  ║
- ║    {"cmd":"EMERGENCY"}                  — parada de emergencia              ║
+ ║  Comandos JSON que acepta (un objeto por linea terminado en \n):             ║
+ ║    {"cmd":"ENABLE","val":true}          — habilitar / deshabilitar motores   ║
+ ║    {"cmd":"MOVE","vx":1.0,"vy":0.0}    — mover (vx: adelante, vy: giro)      ║
+ ║    {"cmd":"STOP"}                       — parada inmediata                   ║
+ ║    {"cmd":"EMERGENCY"}                  — parada de emergencia               ║
  ║                                                                              ║
- ║  Telemetria que publica por Serial cada SAMPLE_MS ms:                       ║
- ║    {"tel":true,"pi":5,"pd":5,"ri":10,"rd":10,"ei":5.0,"ed":5.0,           ║
- ║     "daci":120,"dacd":120,"enc":true,"ts":12345}                            ║
+ ║  Telemetria que publica por Serial cada SAMPLE_MS ms:                        ║
+ ║    {"tel":true,"pi":5,"pd":5,"ri":10,"rd":10,"ei":5.0,"ed":5.0,              ║
+ ║     "daci":120,"dacd":120,"enc":true,"ts":12345}                             ║
  ╚══════════════════════════════════════════════════════════════════════════════╝
 */
 
@@ -46,7 +46,7 @@
 #define SV_IZQ    25    // DAC output → SV_Driver_IZQ (OpAmp+)
 #define FR_IZQ    14    // Direccion motor izquierdo
 #define EN_IZQ    21    // Enable driver izquierdo
-#define ENC_IZQ   32    // Encoder izquierdo (PG_IZQ_IN)
+#define ENC_IZQ   18    // Encoder izquierdo (PG_IZQ_IN)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PARAMETROS DE CONTROL
@@ -60,7 +60,7 @@
 // Para ir mas rapido: aumenta PULSOS_MAX o reduce SAMPLE_MS.
 // Para ir mas lento: reduce PULSOS_MAX.
 #define SAMPLE_MS    200
-#define PULSOS_MAX   22     // pulsos por sample a velocidad maxima
+#define PULSOS_MAX   4     // pulsos por sample a velocidad maxima
 
 // Ganancias del controlador PI
 // kp: respuesta proporcional (cuanto corrige por diferencia instantanea)
@@ -78,7 +78,7 @@ const float INTEGRAL_MAX = 255.0f / 3.0f;
 const int DAC_MIN_ARRANQUE = 60;
 
 // Referencia minima en giro para evitar alarma del driver
-const int REF_MIN_GIRO = 10;
+const int REF_MIN_GIRO = 3;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CINEMATICA DIFERENCIAL
@@ -87,7 +87,7 @@ const int REF_MIN_GIRO = 10;
 const float R_RUEDA = 0.1397f;   // radio de rueda en metros (ajusta al tuyo)
 const float L_BASE  = 1.12f;     // distancia entre ruedas en metros (ajusta)
 const float VMAX    = 4.0f;      // velocidad lineal maxima m/s
-const float WMAX    = 2.0f;      // velocidad angular maxima rad/s
+const float WMAX    = 7.4f;      // velocidad angular maxima rad/s
 const float OMEGA_MAX = VMAX / R_RUEDA;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -206,7 +206,7 @@ void aplicarReferencias(int ri, int rd) {
 
 void cinematica(float vx, float vy, int &ref_izq, int &ref_der) {
   float V = vx * VMAX;
-  float w = -vy * WMAX;
+  float w = vy * WMAX;
 
   float omega_r = V / R_RUEDA + (L_BASE / (2.0f * R_RUEDA)) * w;
   float omega_l = V / R_RUEDA - (L_BASE / (2.0f * R_RUEDA)) * w;
