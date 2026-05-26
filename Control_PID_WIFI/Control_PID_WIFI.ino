@@ -64,7 +64,7 @@ AsyncWebSocket ws("/ws");
 #define EN_IZQ         21
 #define EN_DER         33
 
-#define ENC_IZQ        32
+#define ENC_IZQ        18
 #define ENC_DER        34
 
 // =====================================================

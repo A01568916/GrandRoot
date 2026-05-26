@@ -565,9 +565,14 @@ function cerrarAdmin() {
   document.getElementById('adminModal').classList.remove('open');
 }
 
-// Cerrar al hacer click fuera del modal
-document.getElementById('adminModal').addEventListener('click', function(e) {
-  if (e.target === this) cerrarAdmin();
+// Cerrar al hacer click fuera del modal — se registra tras carga del DOM
+window.addEventListener('load', function() {
+  var overlay = document.getElementById('adminModal');
+  if (overlay) {
+    overlay.addEventListener('click', function(e) {
+      if (e.target === this) cerrarAdmin();
+    });
+  }
 });
 
 function enviarParam(nombre, inputId, btn) {
@@ -595,14 +600,15 @@ function flashBtn(btn, cls) {
 // =====================================================
 
 const BUFFER = 150;
-const emptyArr = () => Array(BUFFER).fill(null);
 Chart.defaults.color = '#8b949e';
 Chart.defaults.borderColor = '#21262d';
 
 function mkChart(id, datasets) {
+  // Arrancamos con arrays vacíos — Chart.js 4.x no dibuja nada con null[]
+  datasets.forEach(ds => { ds.data = []; });
   return new Chart(document.getElementById(id), {
     type: 'line',
-    data: { labels: emptyArr(), datasets },
+    data: { labels: [], datasets },
     options: {
       animation: false, responsive: true, maintainAspectRatio: true,
       interaction: { mode: 'index', intersect: false },
@@ -611,26 +617,26 @@ function mkChart(id, datasets) {
         x: { display: false },
         y: { grid: { color: '#21262d' }, ticks: { color: '#8b949e', font: { size: 10 } } }
       },
-      elements: { point: { radius: 0 }, line: { borderWidth: 1.5, tension: 0.3 } }
+      elements: { point: { radius: 0 }, line: { borderWidth: 1.5, tension: 0.3, spanGaps: true } }
     }
   });
 }
 
 const cRef_d = mkChart('cRef_d',[
-  { label:'Referencia', data:emptyArr(), borderColor:'#a371f7', backgroundColor:'rgba(163,113,247,.07)', fill:true, borderDash:[6,4], borderWidth:1 },
-  { label:'Medida',     data:emptyArr(), borderColor:'#f0883e', backgroundColor:'rgba(240,136,62,.07)',  fill:true }
+  { label:'Referencia', borderColor:'#a371f7', backgroundColor:'rgba(163,113,247,.07)', fill:true, borderDash:[6,4], borderWidth:1 },
+  { label:'Medida',     borderColor:'#f0883e', backgroundColor:'rgba(240,136,62,.07)',  fill:true }
 ]);
 const cRef_i = mkChart('cRef_i',[
-  { label:'Referencia', data:emptyArr(), borderColor:'#a371f7', backgroundColor:'rgba(163,113,247,.07)', fill:true, borderDash:[6,4], borderWidth:1 },
-  { label:'Medida',     data:emptyArr(), borderColor:'#79c0ff', backgroundColor:'rgba(121,192,255,.07)', fill:true }
+  { label:'Referencia', borderColor:'#a371f7', backgroundColor:'rgba(163,113,247,.07)', fill:true, borderDash:[6,4], borderWidth:1 },
+  { label:'Medida',     borderColor:'#79c0ff', backgroundColor:'rgba(121,192,255,.07)', fill:true }
 ]);
 const cErr = mkChart('cErr',[
-  { label:'Derecho',    data:emptyArr(), borderColor:'#f0883e', backgroundColor:'rgba(240,136,62,.07)',  fill:true },
-  { label:'Izquierdo',  data:emptyArr(), borderColor:'#79c0ff', backgroundColor:'rgba(121,192,255,.07)', fill:true }
+  { label:'Derecho',   borderColor:'#f0883e', backgroundColor:'rgba(240,136,62,.07)',  fill:true },
+  { label:'Izquierdo', borderColor:'#79c0ff', backgroundColor:'rgba(121,192,255,.07)', fill:true }
 ]);
 const cEsf = mkChart('cEsf',[
-  { label:'Derecho',    data:emptyArr(), borderColor:'#f0883e', backgroundColor:'rgba(240,136,62,.07)',  fill:true },
-  { label:'Izquierdo',  data:emptyArr(), borderColor:'#79c0ff', backgroundColor:'rgba(121,192,255,.07)', fill:true }
+  { label:'Derecho',   borderColor:'#f0883e', backgroundColor:'rgba(240,136,62,.07)',  fill:true },
+  { label:'Izquierdo', borderColor:'#79c0ff', backgroundColor:'rgba(121,192,255,.07)', fill:true }
 ]);
 
 function push(chart, ...vals) {
