@@ -1,7 +1,7 @@
 /*
  ╔══════════════════════════════════════════════════════════════════════════════╗
  ║  GrandRoot — ESP32 SENSORES                                                  ║
- ║  Combina GPS (TinyGPS++ por Serial2) + IMU MPU9250 (I2C)                    ║
+ ║  Combina GPS (TinyGPS++ por Serial2) + IMU MPU6050 (I2C)                    ║
  ║  Publica un paquete JSON por USB-Serial cada INTERVALO_MS ms                ║
  ║                                                                              ║
  ║  PINOUT:                                                                     ║
@@ -10,11 +10,11 @@
  ║    GPS VIN  → ESP32 VIN  (5 V o 3.3 V segun modulo)                         ║
  ║    GPS GND  → ESP32 GND                                                      ║
  ║                                                                              ║
- ║    MPU9250 SCL → ESP32 GPIO 22                                               ║
- ║    MPU9250 SDA → ESP32 GPIO 21                                               ║
- ║    MPU9250 VCC → ESP32 3V3                                                   ║
- ║    MPU9250 GND → ESP32 GND                                                   ║
- ║    MPU9250 AD0 → GND  (direccion I2C = 0x68)                                 ║
+ ║    MPU6050 SCL → ESP32 GPIO 22                                               ║
+ ║    MPU6050 SDA → ESP32 GPIO 21                                               ║
+ ║    MPU6050 VCC → ESP32 3V3                                                   ║
+ ║    MPU6050 GND → ESP32 GND                                                   ║
+ ║    MPU6050 AD0 → GND  (direccion I2C = 0x68)                                 ║
  ║                                                                              ║
  ║  Libreria requerida:                                                         ║
  ║    TinyGPS++  (instalar en Library Manager de Arduino IDE)                   ║
@@ -55,7 +55,7 @@ const double LAT_REF = 28.7385775000;
 const double LON_REF = -106.1217361670;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// REGISTROS MPU9250
+// REGISTROS MPU6050 (compatibles con MPU9250 para accel y gyro)
 // ═══════════════════════════════════════════════════════════════════════════
 
 #define REG_SMPLRT_DIV  0x19
@@ -96,7 +96,7 @@ DatosIMU imuData;
 unsigned long t_ultimo_envio = 0;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// FUNCIONES AUXILIARES I2C (MPU9250)
+// FUNCIONES AUXILIARES I2C (MPU6050)
 // ═══════════════════════════════════════════════════════════════════════════
 
 void imu_escribir(uint8_t reg, uint8_t valor) {
@@ -148,13 +148,16 @@ bool initIMU() {
   uint8_t id = imu_leer(REG_WHO_AM_I);
 
   // LOG: siempre imprime el ID para diagnostico
-  Serial.printf("[IMU] WHO_AM_I = 0x%02X (esperado 0x71 o 0x73)\n", id);
+  // MPU6050 → 0x68 | MPU9250 → 0x71 o 0x73
+  Serial.printf("[IMU] WHO_AM_I = 0x%02X (esperado 0x68, 0x71 o 0x73)\n", id);
 
-  if (id != 0x71 && id != 0x73) {
+  if (id != 0x68 && id != 0x71 && id != 0x73) {
     Serial.println("[IMU][ERROR] Sensor no detectado.");
     Serial.println("[IMU][ERROR] Revisa: cableado SDA/SCL, alimentacion 3.3V, pin AD0.");
     return false;
   }
+
+  const char* modelo = (id == 0x68) ? "MPU6050" : "MPU9250";
 
   imu_escribir(REG_PWR_MGMT_1, 0x00);   // despertar
   delay(100);
@@ -163,7 +166,7 @@ bool initIMU() {
   imu_escribir(REG_GYRO_CFG,   0x00);   // ±250 °/s
   imu_escribir(REG_ACCEL_CFG,  0x00);   // ±2 g
 
-  Serial.println("[IMU] OK — MPU9250 configurado correctamente.");
+  Serial.printf("[IMU] OK — %s configurado correctamente.\n", modelo);
   return true;
 }
 
@@ -219,18 +222,20 @@ void setup() {
 
   Serial.println("\n============================================");
   Serial.println("  GrandRoot — ESP32 Sensores");
-  Serial.println("  GPS + IMU MPU9250");
+  Serial.println("  GPS + IMU MPU6050");
   Serial.println("============================================");
 
+ // I2C + IMU
+  Wire.begin(21,22);   // SDA=GPIO21, SCL=GPIO22
+  delay(500);
+  imuData.ok = initIMU();
+  
   // Serial2 para el GPS
   Serial2.begin(GPS_BAUDRATE, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
   Serial.printf("[GPS] Serial2 abierto en RX=%d TX=%d a %d baud\n",
                 GPS_RX_PIN, GPS_TX_PIN, GPS_BAUDRATE);
 
-  // I2C + IMU
-  Wire.begin();   // SDA=GPIO21, SCL=GPIO22
-  delay(200);
-  imuData.ok = initIMU();
+ 
 
   // Si el IMU fallo, seguimos funcionando pero marcamos imu_ok=false
   // El sistema de vision y GPS pueden seguir operando sin el IMU

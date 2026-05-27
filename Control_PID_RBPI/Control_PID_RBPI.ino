@@ -68,9 +68,12 @@ const float OMEGA_MAX = VMAX / R_RUEDA;
 float kp = 6.0f;
 float ki = 3.0f;
 
-const float INTEGRAL_MAX     = 255.0f / 3.0f;  // Anti-windup FIX 2
-const int   REF_MIN_GIRO     = 3;              // Ref. mínima FIX 1
-const int   DAC_MIN_ARRANQUE = 70;              // Feedforward FIX 4
+float integral_max     = 255.0f / 3.0f;  // Anti-windup FIX 2 — se recalcula al cambiar ki
+int   ref_min_giro     = 3;              // Ref. mínima FIX 1
+int   dac_min_arranque = 70;             // Feedforward FIX 4
+int   pulsos_max       = PULSOS_MAX;     // Escala de referencia (ajustable por Admin)
+float vmax_param       = VMAX;           // Velocidad lineal máxima (ajustable por Admin)
+float wmax_param       = WMAX;           // Velocidad angular máxima (ajustable por Admin)
 
 // =====================================================
 // ENCODERS
@@ -133,30 +136,32 @@ void setDirDer(bool adelante) {
 
 void cinematica(float vx, float vy, int &ref_izq, int &ref_der) {
 
-  float V = vx * VMAX;
-  float w = vy * WMAX;
+  float V = vx * vmax_param;
+  float w = vy * wmax_param;
+
+  float omega_max_local = vmax_param / R_RUEDA;
 
   float omega_r = V / R_RUEDA + (L_BASE / (2.0f * R_RUEDA)) * w;
   float omega_l = V / R_RUEDA - (L_BASE / (2.0f * R_RUEDA)) * w;
 
   float scale = max(
     max(fabsf(omega_r), fabsf(omega_l)),
-    OMEGA_MAX
-  ) / OMEGA_MAX;
+    omega_max_local
+  ) / omega_max_local;
 
   omega_r /= scale;
   omega_l /= scale;
 
-  ref_izq = (int)roundf(constrain(omega_l / OMEGA_MAX, -1.0f, 1.0f) * PULSOS_MAX);
-  ref_der = (int)roundf(constrain(omega_r / OMEGA_MAX, -1.0f, 1.0f) * PULSOS_MAX);
+  ref_izq = (int)roundf(constrain(omega_l / omega_max_local, -1.0f, 1.0f) * pulsos_max);
+  ref_der = (int)roundf(constrain(omega_r / omega_max_local, -1.0f, 1.0f) * pulsos_max);
 
   // FIX 1 — Referencia mínima de giro
   if (ref_izq != 0)
-    ref_izq = (ref_izq > 0) ? max(ref_izq,  REF_MIN_GIRO)
-                             : min(ref_izq, -REF_MIN_GIRO);
+    ref_izq = (ref_izq > 0) ? max(ref_izq,  ref_min_giro)
+                             : min(ref_izq, -ref_min_giro);
   if (ref_der != 0)
-    ref_der = (ref_der > 0) ? max(ref_der,  REF_MIN_GIRO)
-                             : min(ref_der, -REF_MIN_GIRO);
+    ref_der = (ref_der > 0) ? max(ref_der,  ref_min_giro)
+                             : min(ref_der, -ref_min_giro);
 }
 
 // =====================================================
@@ -225,7 +230,7 @@ void stepPI(MotorState &m, float T) {
 
   m.error     = (float)m.ref - (float)m.medida;
   m.integral += m.error * T;
-  m.integral  = constrain(m.integral, -INTEGRAL_MAX, INTEGRAL_MAX); // FIX 2
+  m.integral  = constrain(m.integral, -integral_max, integral_max); // FIX 2
 
   float u_raw = kp * m.error + ki * m.integral; // FIX 3
   m.u = fabsf(u_raw);
@@ -233,8 +238,8 @@ void stepPI(MotorState &m, float T) {
 
   // FIX 4 — Feedforward zona muerta
   if (m.ref != 0) {
-    m.dac = (int)constrain(m.u + DAC_MIN_ARRANQUE,
-                           (float)DAC_MIN_ARRANQUE, 255.0f);
+    m.dac = (int)constrain(m.u + dac_min_arranque,
+                           (float)dac_min_arranque, 255.0f);
   } else {
     m.dac = 0;
   }
@@ -268,8 +273,30 @@ void procesarComando(String cmd) {
     cinematica(vx, vy, ri, rd);
     aplicarMotores(ri, rd);
   }
-}
 
+  // PARAM,nombre,valor  — Panel Admin
+  else if (cmd.startsWith("PARAM,")) {
+    int p1 = cmd.indexOf(',');
+    int p2 = cmd.indexOf(',', p1 + 1);
+    if (p2 < 0) return;
+    String nombre = cmd.substring(p1 + 1, p2);
+    float  valor  = cmd.substring(p2 + 1).toFloat();
+
+    if      (nombre == "Kp")              { kp = valor; }
+    else if (nombre == "Ki")              { ki = max(valor, 0.001f);
+                                            integral_max = 255.0f / ki;
+                                            motor_i.integral = 0;
+                                            motor_d.integral = 0; }
+    else if (nombre == "PULSOS_MAX")      { pulsos_max = (int)valor; }
+    else if (nombre == "VMAX")            { vmax_param = max(valor, 0.1f); }
+    else if (nombre == "WMAX")            { wmax_param = max(valor, 0.1f); }
+    else if (nombre == "ref_min_giro")    { ref_min_giro = (int)valor; }
+    else if (nombre == "dac_min_arranque"){ dac_min_arranque = (int)constrain(valor, 0, 255); }
+    else { Serial.printf("PARAM_ERR,desconocido,%s\n", nombre.c_str()); return; }
+
+    Serial.printf("PARAM_OK,%s,%.4f\n", nombre.c_str(), valor);
+  }
+}
 // =====================================================
 // SETUP
 // =====================================================

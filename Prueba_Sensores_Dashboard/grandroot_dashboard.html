@@ -607,12 +607,12 @@
   </style>
 
   <script>
-    (function() {
+   (function() {
       const s = document.createElement('script');
-      s.src = '/socket.io/socket.io.js';
+      s.src = 'https://cdn.socket.io/4.4.1/socket.io.min.js';
       s.onerror = () => window.__NO_BACKEND = true;
       document.head.appendChild(s);
-    })();
+   })();
   </script>
 </head>
 <body>
@@ -1003,7 +1003,7 @@ function connectBackend() {
   if (window.__NO_BACKEND || typeof io === 'undefined') {
     startSimulation(); return;
   }
-  const socket = io({ reconnection: true, reconnectionDelay: 2000 });
+  const socket = io('http://' + location.hostname + ':5000', { reconnection: true, reconnectionDelay: 2000, transports: ['websocket', 'polling'] });
   window.socket = socket;
   socket.on('connect', () => {
     stopSimulation(); connected = true;

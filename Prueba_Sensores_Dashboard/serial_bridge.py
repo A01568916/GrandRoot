@@ -137,7 +137,7 @@ def leer_serial(puerto):
                     continue
 
                 # Imprimir en consola para debug
-                print(f"[ESP32] {linea}")
+                #print(f"[ESP32] {linea}")
 
                 # Ignorar las líneas de arranque que no son JSON
                 if not linea.startswith("{"):
