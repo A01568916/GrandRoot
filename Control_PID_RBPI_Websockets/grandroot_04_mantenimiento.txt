@@ -1,0 +1,263 @@
+================================================================
+  GRANDROOT — 04 | Mantenimiento y Diagnóstico
+================================================================
+
+Para quien continúe el proyecto o necesite resolver problemas.
+Cubre verificación del sistema, errores comunes y soluciones
+basadas en lo que ocurrió durante el desarrollo original.
+
+
+================================================================
+  VERIFICACIÓN RÁPIDA DEL SISTEMA COMPLETO
+================================================================
+
+  Ejecuta estos comandos después de encender la RPi para
+  confirmar que todo está funcionando:
+
+  1. IP de wlan0:
+       ip addr show wlan0
+     Debe mostrar: inet 192.168.4.1/24
+
+  2. Hotspot transmitiendo:
+       sudo iw dev wlan0 info | grep ssid
+     Debe mostrar: ssid GRCC
+
+  3. Estado de todos los servicios:
+       sudo systemctl status hostapd --no-pager
+       sudo systemctl status dnsmasq --no-pager
+       sudo systemctl status wlan0-static-ip --no-pager
+       sudo systemctl status grandroot --no-pager
+     Todos deben mostrar: Active: active (running)
+
+  4. Puertos del bridge activos:
+       sudo ss -tlnp | grep -E "8080|8765"
+     Deben aparecer dos líneas con python3
+
+  5. Dispositivos conectados a la red:
+       sudo arp -a
+     Muestra los dispositivos con IP asignada (al conectar celular)
+
+  6. Prueba HTTP desde la misma RPi:
+       curl http://192.168.4.1:8080
+     Debe responder con código HTML
+
+
+================================================================
+  DIAGNÓSTICO POR SÍNTOMA
+================================================================
+
+  SÍNTOMA: No aparece la red GRCC en WiFi
+  ─────────────────────────────────────────
+    sudo systemctl status hostapd --no-pager
+    sudo iw dev wlan0 info | grep ssid
+
+    Si hostapd está activo pero no sale ssid:
+      sudo systemctl restart hostapd
+
+    Si hostapd está failed:
+      sudo journalctl -u hostapd -n 20
+      → Busca el error específico
+
+    Si wlan0 no tiene la IP 192.168.4.1:
+      sudo systemctl restart wlan0-static-ip
+      ip addr show wlan0
+
+  ─────────────────────────────────────────
+  SÍNTOMA: Celular se conecta a GRCC pero no obtiene IP
+  ─────────────────────────────────────────
+    sudo systemctl status dnsmasq --no-pager
+
+    Si dnsmasq está failed:
+      sudo systemctl restart dnsmasq
+      sudo journalctl -u dnsmasq -n 10
+
+    Error común (no crítico, dnsmasq funciona igual):
+      "Failed to set DNS configuration: Unit dbus-org..."
+      "Failed to access /run/dnsmasq/resolv.conf"
+      → Estos warnings son normales, NO indican fallo real
+
+    Error crítico (sí requiere acción):
+      "unknown interface wlan0"
+      → wlan0 no estaba lista cuando dnsmasq arrancó
+      → Solución: sudo systemctl restart dnsmasq
+
+  ─────────────────────────────────────────
+  SÍNTOMA: La página web no carga (http://192.168.4.1:8080)
+  ─────────────────────────────────────────
+    sudo systemctl status grandroot --no-pager
+    sudo ss -tlnp | grep -E "8080|8765"
+
+    Si los puertos no están activos, el bridge no está corriendo:
+      sudo systemctl start grandroot
+
+    Si aparece "Address already in use":
+      sudo fuser -k 8080/tcp
+      sudo fuser -k 8765/tcp
+      sudo systemctl restart grandroot
+
+    Si grandroot está failed:
+      sudo journalctl -u grandroot -n 20
+
+  ─────────────────────────────────────────
+  SÍNTOMA: WebSocket dice "Error de conexión"
+  ─────────────────────────────────────────
+    Verifica que el bridge está corriendo:
+      sudo ss -tlnp | grep 8765
+
+    Verifica que la URL en el HTML es correcta:
+      ws://192.168.4.1:8765
+
+    Verifica que el celular está conectado a GRCC
+    (no a otra red WiFi)
+
+  ─────────────────────────────────────────
+  SÍNTOMA: El ESP32 no responde (no llega telemetría)
+  ─────────────────────────────────────────
+    Verifica que el cable USB está conectado:
+      ls /dev/ttyESP32
+      ls /dev/ttyUSB0
+
+    Si no aparece /dev/ttyESP32:
+      → El symlink udev puede haberse perdido
+      sudo udevadm control --reload-rules
+      sudo udevadm trigger
+      → Desconecta y reconecta el ESP32
+
+    Si el puerto existe pero no responde:
+      → Verifica que el ESP32 tiene el firmware correcto
+      → Verifica baud rate: debe ser 115200
+
+    Ver logs del bridge en tiempo real:
+      journalctl -u grandroot -f
+
+  ─────────────────────────────────────────
+  SÍNTOMA: La terminal se congela (cursor parpadeando)
+  ─────────────────────────────────────────
+    Esto ocurre cuando un comando abre un paginador.
+    Presiona: q  (minúscula)
+    Si no funciona: Abre una nueva terminal
+
+    Para evitarlo, siempre usa --no-pager:
+      sudo systemctl status grandroot --no-pager
+      sudo journalctl -u grandroot -n 20 --no-pager
+
+  ─────────────────────────────────────────
+  SÍNTOMA: Permission denied al acceder al puerto serial
+  ─────────────────────────────────────────
+    El usuario no está en el grupo dialout:
+      groups grandroot
+
+    Si no aparece dialout:
+      sudo usermod -a -G dialout grandroot
+      newgrp dialout
+
+    Verifica permisos del puerto:
+      ls -la /dev/ttyUSB0
+    Debe mostrar: crw-rw---- 1 root dialout
+
+
+================================================================
+  SERVICIOS Y ARCHIVOS DE CONFIGURACIÓN
+================================================================
+
+  SERVICIOS systemd:
+    grandroot          → bridge Python (HTTP + WebSocket + Serial)
+    hostapd            → hotspot WiFi GRCC
+    dnsmasq            → servidor DHCP (asigna IPs)
+    wlan0-static-ip    → asigna IP 192.168.4.1 a wlan0
+
+  ARCHIVOS IMPORTANTES:
+    /etc/hostapd/hostapd.conf
+      → Nombre y contraseña del hotspot (ssid, wpa_passphrase)
+
+    /etc/dnsmasq.conf
+      → Rango de IPs asignadas a clientes
+
+    /etc/NetworkManager/NetworkManager.conf
+      → Contiene: unmanaged-devices=interface-name:wlan0
+      → CRÍTICO: si se borra esta línea, NM tomará wlan0
+        y el hotspot dejará de funcionar
+
+    /etc/systemd/system/grandroot.service
+      → Rutas del script, usuario, puerto del ESP32
+
+    /etc/systemd/system/wlan0-static-ip.service
+      → Asigna 192.168.4.1 a wlan0 al arrancar
+
+    /etc/udev/rules.d/99-esp32.rules
+      → Fija el ESP32 como /dev/ttyESP32
+
+    /home/grandroot/Downloads/ControlCarr/
+      → grandroot_bridge.py e index.html deben estar juntos aquí
+
+    /home/grandroot/venv/
+      → Entorno virtual Python con websockets y pyserial
+
+
+================================================================
+  COMANDOS DE EMERGENCIA
+================================================================
+
+  Todo falla, reiniciar todo manualmente:
+
+    sudo systemctl restart wlan0-static-ip
+    sudo systemctl restart hostapd
+    sudo systemctl restart dnsmasq
+    sudo systemctl restart grandroot
+
+  Si nada responde:
+
+    sudo reboot
+
+  Ver qué está usando un puerto:
+
+    sudo fuser 8080/tcp
+    sudo fuser 8765/tcp
+
+  Matar proceso en un puerto:
+
+    sudo fuser -k 8080/tcp
+    sudo fuser -k 8765/tcp
+
+  Ver todos los logs del sistema recientes:
+
+    sudo journalctl -n 50 --no-pager
+
+
+================================================================
+  INFORMACIÓN DEL HARDWARE
+================================================================
+
+  Raspberry Pi 5
+  Usuario:       grandroot
+  Hostname:      grandroot-desktop
+
+  ESP32:
+    Chip serial: CH340 (ch341-uart)
+    idVendor:    1a86
+    idProduct:   7523
+    Puerto fijo: /dev/ttyESP32
+    Baud rate:   115200
+
+  Protocolo Serial (ESP32 ↔ RPi):
+    Comandos enviados al ESP32:
+      ENABLE,true         → activa motores
+      ENABLE,false        → desactiva motores
+      MOVE,vx,vy          → mueve el robot
+
+    Telemetría recibida del ESP32:
+      TEL,pi,pd,ri,rd,ei,ed,daci,dacd
+        pi   = pulsos izquierdo
+        pd   = pulsos derecho
+        ri   = referencia izquierda
+        rd   = referencia derecha
+        ei   = error izquierdo
+        ed   = error derecho
+        daci = esfuerzo (DAC) izquierdo
+        dacd = esfuerzo (DAC) derecho
+
+
+================================================================
+  GrandRoot — Proyecto de Agricultura de Precisión
+  Equipo Mecatrónica / Mecánica / Biotecnología — ITESM
+================================================================

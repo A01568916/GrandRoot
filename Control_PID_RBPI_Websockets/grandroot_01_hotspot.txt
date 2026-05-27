@@ -1,0 +1,192 @@
+================================================================
+  GRANDROOT — 01 | Configuración del Hotspot WiFi (GRCC)
+================================================================
+
+Objetivo
+--------
+Configurar la Raspberry Pi para que cree su propia red WiFi (GRCC)
+automáticamente al encender, sin necesidad de router externo.
+
+  Red WiFi:     GRCC
+  Contraseña:   12345678
+  IP fija RPi:  192.168.4.1
+  Interfaz web: http://192.168.4.1:8080
+  WebSocket:    ws://192.168.4.1:8765
+
+NOTA: Esta RPi usa NetworkManager (NO dhcpcd). Muchos tutoriales
+en internet usan dhcpcd — no funcionarán aquí.
+
+
+================================================================
+  1. INSTALAR PAQUETES NECESARIOS
+================================================================
+
+    sudo apt install hostapd dnsmasq -y
+
+  hostapd  → crea y administra el punto de acceso WiFi
+  dnsmasq  → asigna IPs a los dispositivos que se conecten (DHCP)
+
+
+================================================================
+  2. EVITAR QUE NETWORKMANAGER INTERFIERA CON wlan0
+================================================================
+
+    sudo nano /etc/NetworkManager/NetworkManager.conf
+
+  Agrega al final:
+
+------------------------------------------------------------
+[keyfile]
+unmanaged-devices=interface-name:wlan0
+------------------------------------------------------------
+
+  Guarda con Ctrl+O → Enter → Ctrl+X
+
+  Esto hace que NetworkManager ignore wlan0 completamente
+  y deje que hostapd la controle.
+
+
+================================================================
+  3. CONFIGURAR DNSMASQ (SERVIDOR DHCP)
+================================================================
+
+    sudo nano /etc/dnsmasq.conf
+
+  Agrega al final:
+
+------------------------------------------------------------
+interface=wlan0
+bind-interfaces
+dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,24h
+------------------------------------------------------------
+
+  Guarda con Ctrl+O → Enter → Ctrl+X
+
+  bind-interfaces es necesario para que dnsmasq no falle
+  si wlan0 todavía no está lista al arrancar.
+
+  Configurar dnsmasq para que se reinicie si falla:
+
+    sudo mkdir -p /etc/systemd/system/dnsmasq.service.d
+
+    sudo bash -c 'cat > /etc/systemd/system/dnsmasq.service.d/restart.conf << EOF2
+[Service]
+Restart=on-failure
+RestartSec=5
+EOF2'
+
+
+================================================================
+  4. CONFIGURAR HOSTAPD (EL ACCESS POINT)
+================================================================
+
+  Usa este comando para sobreescribir el archivo directamente
+  (más confiable que nano para este archivo):
+
+    sudo bash -c 'cat > /etc/hostapd/hostapd.conf << EOF2
+interface=wlan0
+driver=nl80211
+ssid=GRCC
+hw_mode=g
+channel=6
+wmm_enabled=0
+macaddr_acl=0
+auth_algs=1
+wpa=2
+wpa_passphrase=12345678
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+ieee80211n=1
+EOF2'
+
+  Verifica que quedó bien:
+
+    sudo cat /etc/hostapd/hostapd.conf
+
+  Debe mostrar ssid=GRCC y wpa_passphrase=12345678
+
+
+================================================================
+  5. CONFIGURAR IP ESTÁTICA PERMANENTE PARA wlan0
+================================================================
+
+  IMPORTANTE: dhcpcd no existe en esta RPi. La IP se asigna
+  con un servicio systemd dedicado:
+
+    sudo bash -c 'cat > /etc/systemd/system/wlan0-static-ip.service << EOF2
+[Unit]
+Description=Asignar IP estatica a wlan0
+After=hostapd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/ip addr add 192.168.4.1/24 dev wlan0
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF2'
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable wlan0-static-ip
+
+  Verifica:
+
+    ip addr show wlan0
+
+  Debe mostrar: inet 192.168.4.1/24
+
+
+================================================================
+  6. ACTIVAR HOSTAPD Y DNSMASQ COMO SERVICIOS
+================================================================
+
+    sudo systemctl unmask hostapd
+    sudo systemctl enable hostapd
+    sudo systemctl enable dnsmasq
+    sudo systemctl daemon-reload
+    sudo reboot
+
+
+================================================================
+  7. VERIFICAR DESPUÉS DEL REINICIO
+================================================================
+
+  Desde la terminal:
+
+    ip addr show wlan0
+    sudo iw dev wlan0 info | grep ssid
+    sudo systemctl status hostapd --no-pager
+    sudo systemctl status dnsmasq --no-pager
+
+  Desde el celular o PC:
+
+  1. Busca la red WiFi "GRCC"
+  2. Conéctate con contraseña 12345678
+  3. Abre: http://192.168.4.1:8080
+
+
+================================================================
+  8. ORDEN DE ARRANQUE AL ENCENDER LA RPi
+================================================================
+
+  1. wlan0-static-ip  → asigna 192.168.4.1 a wlan0
+  2. hostapd          → crea la red WiFi GRCC
+  3. dnsmasq          → asigna IPs a dispositivos conectados
+  4. grandroot        → arranca el bridge Serial↔WebSocket + HTTP
+
+  Todo automático. Solo encender la RPi y conectarse a GRCC.
+
+
+================================================================
+  REFERENCIA RÁPIDA
+================================================================
+
+  Red WiFi:     GRCC          Contraseña:  12345678
+  IP RPi:       192.168.4.1   Web:         http://192.168.4.1:8080
+  WebSocket:    ws://192.168.4.1:8765
+
+================================================================
+  GrandRoot — Proyecto de Agricultura de Precisión
+  Equipo Mecatrónica / Mecánica / Biotecnología — ITESM
+================================================================

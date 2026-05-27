@@ -1,0 +1,146 @@
+================================================================
+  GRANDROOT — 03 | Cambiar entre Hotspot e Internet
+================================================================
+
+Contexto
+--------
+La RPi tiene una sola interfaz WiFi (wlan0). No puede tener
+hotspot y conexión a internet al mismo tiempo.
+
+  Modo por defecto al encender: HOTSPOT (GRCC)
+  Modo internet: solo para instalar paquetes o actualizar
+
+
+================================================================
+  PASAR A MODO INTERNET
+================================================================
+
+  PASO 1 — Editar NetworkManager.conf:
+
+    sudo nano /etc/NetworkManager/NetworkManager.conf
+
+  Comenta las dos líneas que agregamos:
+
+    #[keyfile]
+    #unmanaged-devices=interface-name:wlan0
+
+  Guarda con Ctrl+O → Enter → Ctrl+X
+
+  PASO 2 — Detener hotspot y activar WiFi:
+
+    sudo systemctl stop hostapd
+    sudo nmcli radio wifi on
+    sudo systemctl restart NetworkManager
+
+  PASO 3 — Si la interfaz gráfica de WiFi no aparece:
+
+    sudo reboot
+
+  Al volver aparecerán las redes WiFi disponibles.
+  Conéctate desde la interfaz gráfica normalmente.
+
+  PASO 4 — Verificar internet:
+
+    ping -c 3 google.com
+
+
+================================================================
+  VOLVER A MODO HOTSPOT
+================================================================
+
+  PASO 1 — Editar NetworkManager.conf:
+
+    sudo nano /etc/NetworkManager/NetworkManager.conf
+
+  Descomenta o agrega al final:
+
+    [keyfile]
+    unmanaged-devices=interface-name:wlan0
+
+  Guarda con Ctrl+O → Enter → Ctrl+X
+
+  PASO 2 — Detener WiFi cliente y arrancar hotspot:
+
+    sudo systemctl stop wpa_supplicant
+    sudo nmcli device set wlan0 managed no
+    sudo systemctl start hostapd
+
+  PASO 3 — Si aparece este warning, ejecútalo:
+    "The unit file of wpa_supplicant.service changed on disk"
+
+    sudo systemctl daemon-reload
+
+  PASO 4 — Verificar que GRCC está transmitiendo:
+
+    sudo iw dev wlan0 info | grep ssid
+
+  Debe mostrar: ssid GRCC
+
+  Si no muestra nada:
+
+    sudo systemctl restart hostapd
+    sudo iw dev wlan0 info | grep ssid
+
+  Si aún no aparece:
+
+    sudo reboot
+
+
+================================================================
+  INSTALAR PAQUETES PYTHON
+================================================================
+
+  1. Pasar a modo internet (pasos anteriores)
+  2. Conectarse a WiFi desde la interfaz gráfica
+  3. Instalar en el entorno virtual:
+
+       source /home/grandroot/venv/bin/activate
+       pip install <nombre-del-paquete>
+
+  4. Volver a modo hotspot (pasos anteriores)
+
+  Paquetes ya instalados:
+    websockets    → comunicación WebSocket
+    pyserial      → comunicación Serial USB con ESP32
+
+
+================================================================
+  COMANDOS QUE NO FUNCIONAN EN ESTA RPi
+================================================================
+
+  Estos comandos parecen lógicos pero fallan porque
+  NetworkManager.conf tiene wlan0 como unmanaged:
+
+  ✗ sudo nmcli device wifi connect "RED" password "PASS"
+  ✗ sudo nmcli device wifi rescan
+  ✗ sudo iwlist wlan0 scan
+  ✗ sudo systemctl restart display-manager
+
+  Solución siempre: editar NetworkManager.conf + reboot.
+
+
+================================================================
+  RESUMEN RÁPIDO
+================================================================
+
+  → INTERNET:
+    1. Comentar unmanaged-devices en NetworkManager.conf
+    2. sudo systemctl stop hostapd
+    3. sudo nmcli radio wifi on
+    4. sudo systemctl restart NetworkManager
+    5. Si no aparece WiFi → sudo reboot
+
+  → HOTSPOT:
+    1. Descomentar unmanaged-devices en NetworkManager.conf
+    2. sudo systemctl stop wpa_supplicant
+    3. sudo nmcli device set wlan0 managed no
+    4. sudo systemctl start hostapd
+    5. Si warning → sudo systemctl daemon-reload
+    6. sudo iw dev wlan0 info | grep ssid
+    7. Si no sale GRCC → sudo systemctl restart hostapd
+    8. Si nada funciona → sudo reboot
+
+================================================================
+  GrandRoot — Proyecto de Agricultura de Precisión
+  Equipo Mecatrónica / Mecánica / Biotecnología — ITESM
+================================================================
