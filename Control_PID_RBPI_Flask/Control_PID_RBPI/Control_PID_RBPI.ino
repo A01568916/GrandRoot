@@ -1,22 +1,22 @@
 /*
- * Control_PID_Serial.ino
+ * Control_PID_RBPI.ino
  * ESP32 — Control PI Posicional
  * Robot diferencial con comunicación Serial USB → Raspberry Pi
- *
- * NO requiere librerías externas.
  *
  * Comunicación Serial a 115200 baud:
  *   → Comandos recibidos desde la RPi:
  *       ENABLE,true / ENABLE,false
  *       MOVE,vx,vy
+ *       PARAM,nombre,valor
  *   ← Telemetría enviada a la RPi (cada SAMPLE_MS ms):
- *       TEL,pi,pd,ri,rd,ei,ed,daci,dacd
+ *       TEL,medida_izq,medida_der,ref_izq,ref_der,error_izq,error_der,dac_izq,dac_der
  *
  * FIXES aplicados:
  *  1. Referencia mínima en giros  → evita alarma del driver
  *  2. Anti-windup correcto        → integral limitada a 255/ki
  *  3. fabsf solo al DAC final     → integral correcta en reversa
  *  4. Feedforward zona muerta     → arranque seguro con ref baja
+ *  5. Reset integral/DAC al soltar flecha (ref=0) → evita DAC creciente
  */
 
 // =====================================================
@@ -47,7 +47,8 @@ void stepPI(MotorState &m, float T);
 // =====================================================
 
 #define SAMPLE_MS   200
-#define PULSOS_MAX  22
+
+int   PULSOS_MAX       = 22;
 
 // =====================================================
 // CINEMÁTICA
@@ -56,10 +57,9 @@ void stepPI(MotorState &m, float T);
 const float R_RUEDA = 0.1397f;
 const float L_BASE  = 1.12f;
 
-const float VMAX = 4.0f;
-const float WMAX = 7.4f;
-
-const float OMEGA_MAX = VMAX / R_RUEDA;
+float VMAX     = 4.0f;
+float WMAX     = 7.4f;
+float OMEGA_MAX = VMAX / R_RUEDA;  // Se recalcula si cambia VMAX
 
 // =====================================================
 // PI POSICIONAL
@@ -68,12 +68,9 @@ const float OMEGA_MAX = VMAX / R_RUEDA;
 float kp = 6.0f;
 float ki = 3.0f;
 
-float integral_max     = 255.0f / 3.0f;  // Anti-windup FIX 2 — se recalcula al cambiar ki
-int   ref_min_giro     = 3;              // Ref. mínima FIX 1
-int   dac_min_arranque = 70;             // Feedforward FIX 4
-int   pulsos_max       = PULSOS_MAX;     // Escala de referencia (ajustable por Admin)
-float vmax_param       = VMAX;           // Velocidad lineal máxima (ajustable por Admin)
-float wmax_param       = WMAX;           // Velocidad angular máxima (ajustable por Admin)
+float INTEGRAL_MAX     = 255.0f / 3.0f;
+int   REF_MIN_GIRO     = 3;
+int   DAC_MIN_ARRANQUE = 70;
 
 // =====================================================
 // ENCODERS
@@ -119,6 +116,17 @@ unsigned long t_prev = 0;
 String serial_buf = "";
 
 // =====================================================
+// RESET MOTOR  (FIX 5)
+// =====================================================
+
+void resetMotor(MotorState &m) {
+  m.integral = 0.0f;
+  m.u        = 0.0f;
+  m.error    = 0.0f;
+  m.dac      = 0;
+}
+
+// =====================================================
 // DIRECCIÓN MOTORES
 // =====================================================
 
@@ -136,32 +144,30 @@ void setDirDer(bool adelante) {
 
 void cinematica(float vx, float vy, int &ref_izq, int &ref_der) {
 
-  float V = vx * vmax_param;
-  float w = vy * wmax_param;
-
-  float omega_max_local = vmax_param / R_RUEDA;
+  float V = vx * VMAX;
+  float w = vy * WMAX;
 
   float omega_r = V / R_RUEDA + (L_BASE / (2.0f * R_RUEDA)) * w;
   float omega_l = V / R_RUEDA - (L_BASE / (2.0f * R_RUEDA)) * w;
 
   float scale = max(
     max(fabsf(omega_r), fabsf(omega_l)),
-    omega_max_local
-  ) / omega_max_local;
+    OMEGA_MAX
+  ) / OMEGA_MAX;
 
   omega_r /= scale;
   omega_l /= scale;
 
-  ref_izq = (int)roundf(constrain(omega_l / omega_max_local, -1.0f, 1.0f) * pulsos_max);
-  ref_der = (int)roundf(constrain(omega_r / omega_max_local, -1.0f, 1.0f) * pulsos_max);
+  ref_izq = (int)roundf(constrain(omega_l / OMEGA_MAX, -1.0f, 1.0f) * PULSOS_MAX);
+  ref_der = (int)roundf(constrain(omega_r / OMEGA_MAX, -1.0f, 1.0f) * PULSOS_MAX);
 
   // FIX 1 — Referencia mínima de giro
   if (ref_izq != 0)
-    ref_izq = (ref_izq > 0) ? max(ref_izq,  ref_min_giro)
-                             : min(ref_izq, -ref_min_giro);
+    ref_izq = (ref_izq > 0) ? max(ref_izq,  REF_MIN_GIRO)
+                             : min(ref_izq, -REF_MIN_GIRO);
   if (ref_der != 0)
-    ref_der = (ref_der > 0) ? max(ref_der,  ref_min_giro)
-                             : min(ref_der, -ref_min_giro);
+    ref_der = (ref_der > 0) ? max(ref_der,  REF_MIN_GIRO)
+                             : min(ref_der, -REF_MIN_GIRO);
 }
 
 // =====================================================
@@ -175,13 +181,11 @@ void aplicarMotores(int ri, int rd) {
 
   if (dir_izq != dir_actual_izq) {
     dacWrite(SV_SIGNAL_IZQ, 0);
-    motor_i.integral = 0;
-    motor_i.u        = 0;
+    resetMotor(motor_i);
   }
   if (dir_der != dir_actual_der) {
     dacWrite(SV_SIGNAL_DER, 0);
-    motor_d.integral = 0;
-    motor_d.u        = 0;
+    resetMotor(motor_d);
   }
 
   setDirIzq(dir_izq);
@@ -189,6 +193,16 @@ void aplicarMotores(int ri, int rd) {
 
   dir_actual_izq = dir_izq;
   dir_actual_der = dir_der;
+
+  // FIX 5 — Al soltar la flecha (ref=0) limpiamos estado acumulado
+  if (ri == 0) {
+    dacWrite(SV_SIGNAL_IZQ, 0);
+    resetMotor(motor_i);
+  }
+  if (rd == 0) {
+    dacWrite(SV_SIGNAL_DER, 0);
+    resetMotor(motor_d);
+  }
 
   motor_i.ref = ri;
   motor_d.ref = rd;
@@ -210,15 +224,11 @@ void enableMotores(bool on) {
     dacWrite(SV_SIGNAL_DER, 0);
     pinMode(EN_IZQ, INPUT);
     pinMode(EN_DER, INPUT);
-    motor_i.integral = 0;
-    motor_i.u        = 0;
-    motor_d.integral = 0;
-    motor_d.u        = 0;
+    resetMotor(motor_i);
+    resetMotor(motor_d);
   }
 
   motors_enabled = on;
-
-  // Confirmar por Serial a la RPi
   Serial.println(on ? "ENABLE,true" : "ENABLE,false");
 }
 
@@ -228,21 +238,23 @@ void enableMotores(bool on) {
 
 void stepPI(MotorState &m, float T) {
 
+  // FIX 5 — Si ref es 0 no hay nada que controlar
+  if (m.ref == 0) {
+    resetMotor(m);
+    return;
+  }
+
   m.error     = (float)m.ref - (float)m.medida;
   m.integral += m.error * T;
-  m.integral  = constrain(m.integral, -integral_max, integral_max); // FIX 2
+  m.integral  = constrain(m.integral, -INTEGRAL_MAX, INTEGRAL_MAX); // FIX 2
 
   float u_raw = kp * m.error + ki * m.integral; // FIX 3
   m.u = fabsf(u_raw);
   m.u = constrain(m.u, 0.0f, 255.0f);
 
   // FIX 4 — Feedforward zona muerta
-  if (m.ref != 0) {
-    m.dac = (int)constrain(m.u + dac_min_arranque,
-                           (float)dac_min_arranque, 255.0f);
-  } else {
-    m.dac = 0;
-  }
+  m.dac = (int)constrain(m.u + DAC_MIN_ARRANQUE,
+                         (float)DAC_MIN_ARRANQUE, 255.0f);
 }
 
 // =====================================================
@@ -282,21 +294,25 @@ void procesarComando(String cmd) {
     String nombre = cmd.substring(p1 + 1, p2);
     float  valor  = cmd.substring(p2 + 1).toFloat();
 
-    if      (nombre == "Kp")              { kp = valor; }
-    else if (nombre == "Ki")              { ki = max(valor, 0.001f);
-                                            integral_max = 255.0f / ki;
-                                            motor_i.integral = 0;
-                                            motor_d.integral = 0; }
-    else if (nombre == "PULSOS_MAX")      { pulsos_max = (int)valor; }
-    else if (nombre == "VMAX")            { vmax_param = max(valor, 0.1f); }
-    else if (nombre == "WMAX")            { wmax_param = max(valor, 0.1f); }
-    else if (nombre == "ref_min_giro")    { ref_min_giro = (int)valor; }
-    else if (nombre == "dac_min_arranque"){ dac_min_arranque = (int)constrain(valor, 0, 255); }
+    nombre.toLowerCase();  // case-insensitive como en WiFi
+
+    if      (nombre == "pulsos_max")       { PULSOS_MAX       = (int)valor; }
+    else if (nombre == "vmax")             { VMAX             = max(valor, 0.1f);
+                                             OMEGA_MAX        = VMAX / R_RUEDA; }
+    else if (nombre == "wmax")             { WMAX             = max(valor, 0.1f); }
+    else if (nombre == "kp")               { kp               = valor; }
+    else if (nombre == "ki")               { ki               = max(valor, 0.001f);
+                                             INTEGRAL_MAX     = 255.0f / ki;
+                                             resetMotor(motor_i);
+                                             resetMotor(motor_d); }
+    else if (nombre == "ref_min_giro")     { REF_MIN_GIRO     = (int)valor; }
+    else if (nombre == "dac_min_arranque") { DAC_MIN_ARRANQUE = (int)constrain(valor, 0, 255); }
     else { Serial.printf("PARAM_ERR,desconocido,%s\n", nombre.c_str()); return; }
 
     Serial.printf("PARAM_OK,%s,%.4f\n", nombre.c_str(), valor);
   }
 }
+
 // =====================================================
 // SETUP
 // =====================================================
