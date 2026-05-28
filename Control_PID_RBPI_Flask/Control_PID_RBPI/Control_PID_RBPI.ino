@@ -1,22 +1,31 @@
 /*
- * Control_PID_RBPI.ino
+ * Control_PID_Serial.ino
  * ESP32 — Control PI Posicional
- * Robot diferencial con comunicación Serial USB → Raspberry Pi
+ * Robot diferencial controlado por SERIAL (desde Raspberry Pi 5)
  *
- * Comunicación Serial a 115200 baud:
- *   → Comandos recibidos desde la RPi:
- *       ENABLE,true / ENABLE,false
- *       MOVE,vx,vy
- *       PARAM,nombre,valor
- *   ← Telemetría enviada a la RPi (cada SAMPLE_MS ms):
- *       TEL,medida_izq,medida_der,ref_izq,ref_der,error_izq,error_der,dac_izq,dac_der
+ * MIGRACIÓN: Esta versión reemplaza el Access Point WiFi + WebSocket
+ * por comunicación SERIAL pura a 115200 baudios. La Raspberry Pi corre
+ * grandroot_bridge.py (Flask) que sirve el HTML y traduce las peticiones
+ * web en comandos seriales hacia este ESP32.
  *
- * FIXES aplicados:
- *  1. Referencia mínima en giros  → evita alarma del driver
- *  2. Anti-windup correcto        → integral limitada a 255/ki
- *  3. fabsf solo al DAC final     → integral correcta en reversa
- *  4. Feedforward zona muerta     → arranque seguro con ref baja
- *  5. Reset integral/DAC al soltar flecha (ref=0) → evita DAC creciente
+ * PROTOCOLO (idéntico al de WebSocket, ahora por Serial, una línea por comando):
+ *   ← (recibe)  ENABLE,true / ENABLE,false
+ *   ← (recibe)  MOVE,vx,vy
+ *   ← (recibe)  PARAM,nombre,valor
+ *   → (envía)   TEL,pi,pd,ri,rd,ei,ed,daci,dacd   (cada SAMPLE_MS ms)
+ *   → (envía)   PARAM_OK,nombre,valor             (eco al aplicar parámetro)
+ *
+ * IMPORTANTE SOBRE EL SERIAL:
+ *   El puerto Serial ahora es el CANAL DE DATOS, no un canal de debug.
+ *   Por eso NO se imprimen mensajes de log ([WS], [PARAM], etc.): cualquier
+ *   texto que no sea TEL, o PARAM_OK, ensuciaría el flujo que lee la
+ *   Raspberry. Si necesitas depurar, usa un prefijo y fíltralo en Python,
+ *   o usa Serial2 hacia otro pin.
+ *
+ * FIXES de control conservados del original:
+ *  1. Referencia mínima en giros   2. Anti-windup
+ *  3. fabsf solo al DAC final      4. Feedforward zona muerta
+ *  5. Reset integral/DAC al soltar flecha (ref=0)
  */
 
 // =====================================================
@@ -43,12 +52,12 @@ void stepPI(MotorState &m, float T);
 #define ENC_DER        34
 
 // =====================================================
-// PARÁMETROS
+// PARÁMETROS (modificables en tiempo real vía PARAM,)
 // =====================================================
 
 #define SAMPLE_MS   200
 
-int   PULSOS_MAX       = 22;
+int   PULSOS_MAX      = 22;
 
 // =====================================================
 // CINEMÁTICA
@@ -57,9 +66,10 @@ int   PULSOS_MAX       = 22;
 const float R_RUEDA = 0.1397f;
 const float L_BASE  = 1.12f;
 
-float VMAX     = 4.0f;
-float WMAX     = 7.4f;
-float OMEGA_MAX = VMAX / R_RUEDA;  // Se recalcula si cambia VMAX
+float VMAX = 4.0f;
+float WMAX = 7.4f;
+
+float OMEGA_MAX = VMAX / R_RUEDA;   // Se recalcula si cambia VMAX
 
 // =====================================================
 // PI POSICIONAL
@@ -68,9 +78,9 @@ float OMEGA_MAX = VMAX / R_RUEDA;  // Se recalcula si cambia VMAX
 float kp = 6.0f;
 float ki = 3.0f;
 
-float INTEGRAL_MAX     = 255.0f / 3.0f;
-int   REF_MIN_GIRO     = 3;
-int   DAC_MIN_ARRANQUE = 70;
+float INTEGRAL_MAX    = 255.0f / 3.0f;  // Anti-windup — se recalcula si cambia ki
+int   REF_MIN_GIRO    = 3;              // Ref. mínima FIX 1
+int   DAC_MIN_ARRANQUE = 70;            // Feedforward FIX 4
 
 // =====================================================
 // ENCODERS
@@ -110,13 +120,13 @@ bool motors_enabled = false;
 unsigned long t_prev = 0;
 
 // =====================================================
-// BUFFER SERIAL
+// BUFFER DE LÍNEA SERIAL
 // =====================================================
 
-String serial_buf = "";
+String rxLine = "";
 
 // =====================================================
-// RESET MOTOR  (FIX 5)
+// RESET DE ESTADO DE UN MOTOR
 // =====================================================
 
 void resetMotor(MotorState &m) {
@@ -194,7 +204,7 @@ void aplicarMotores(int ri, int rd) {
   dir_actual_izq = dir_izq;
   dir_actual_der = dir_der;
 
-  // FIX 5 — Al soltar la flecha (ref=0) limpiamos estado acumulado
+  // FIX 5 — Al soltar la flecha (ref→0) limpiamos estado acumulado
   if (ri == 0) {
     dacWrite(SV_SIGNAL_IZQ, 0);
     resetMotor(motor_i);
@@ -229,7 +239,6 @@ void enableMotores(bool on) {
   }
 
   motors_enabled = on;
-  Serial.println(on ? "ENABLE,true" : "ENABLE,false");
 }
 
 // =====================================================
@@ -238,13 +247,13 @@ void enableMotores(bool on) {
 
 void stepPI(MotorState &m, float T) {
 
-  // FIX 5 — Si ref es 0 no hay nada que controlar
+  // FIX 5 — Si ref es 0 no hay nada que controlar; salimos limpio
   if (m.ref == 0) {
     resetMotor(m);
     return;
   }
 
-  m.error     = (float)m.ref - (float)m.medida;
+  m.error    = (float)m.ref - (float)m.medida;
   m.integral += m.error * T;
   m.integral  = constrain(m.integral, -INTEGRAL_MAX, INTEGRAL_MAX); // FIX 2
 
@@ -258,17 +267,54 @@ void stepPI(MotorState &m, float T) {
 }
 
 // =====================================================
-// PROCESAR COMANDO SERIAL
+// PROCESAR PARÁMETRO  PARAM,nombre,valor
+// =====================================================
+
+void procesarParam(String cmd) {
+  // cmd llega sin el prefijo "PARAM,"
+  int sep = cmd.indexOf(',');
+  if (sep < 0) return;
+
+  String nombre = cmd.substring(0, sep);
+  float  valor  = cmd.substring(sep + 1).toFloat();
+
+  nombre.toLowerCase();
+
+  if      (nombre == "pulsos_max")       { PULSOS_MAX       = (int)valor; }
+  else if (nombre == "vmax")             { VMAX             = valor;
+                                           OMEGA_MAX        = VMAX / R_RUEDA; }
+  else if (nombre == "wmax")             { WMAX             = valor; }
+  else if (nombre == "kp")               { kp               = valor; }
+  else if (nombre == "ki")               { ki               = valor;
+                                           INTEGRAL_MAX     = 255.0f / ki; }
+  else if (nombre == "ref_min_gir")      { REF_MIN_GIRO     = (int)valor; }
+  else if (nombre == "dac_min_arranque") { DAC_MIN_ARRANQUE = (int)valor; }
+  else {
+    return;  // Nombre desconocido — sin eco (no ensuciar serial)
+  }
+
+  // Eco de confirmación al cliente (por Serial)
+  Serial.print("PARAM_OK,");
+  Serial.print(nombre);
+  Serial.print(",");
+  Serial.println(String(valor, 4));
+}
+
+// =====================================================
+// PROCESAR COMANDO
 // =====================================================
 
 void procesarComando(String cmd) {
 
   cmd.trim();
+  if (cmd.length() == 0) return;
 
   // ENABLE,true  /  ENABLE,false
   if (cmd.startsWith("ENABLE,")) {
     bool on = (cmd.substring(7) == "true");
     enableMotores(on);
+    Serial.print("ENABLE,");
+    Serial.println(on ? "true" : "false");
   }
 
   // MOVE,vx,vy
@@ -286,30 +332,26 @@ void procesarComando(String cmd) {
     aplicarMotores(ri, rd);
   }
 
-  // PARAM,nombre,valor  — Panel Admin
+  // PARAM,nombre,valor
   else if (cmd.startsWith("PARAM,")) {
-    int p1 = cmd.indexOf(',');
-    int p2 = cmd.indexOf(',', p1 + 1);
-    if (p2 < 0) return;
-    String nombre = cmd.substring(p1 + 1, p2);
-    float  valor  = cmd.substring(p2 + 1).toFloat();
+    procesarParam(cmd.substring(6));
+  }
+}
 
-    nombre.toLowerCase();  // case-insensitive como en WiFi
+// =====================================================
+// LECTURA SERIAL NO BLOQUEANTE (una línea por comando)
+// =====================================================
 
-    if      (nombre == "pulsos_max")       { PULSOS_MAX       = (int)valor; }
-    else if (nombre == "vmax")             { VMAX             = max(valor, 0.1f);
-                                             OMEGA_MAX        = VMAX / R_RUEDA; }
-    else if (nombre == "wmax")             { WMAX             = max(valor, 0.1f); }
-    else if (nombre == "kp")               { kp               = valor; }
-    else if (nombre == "ki")               { ki               = max(valor, 0.001f);
-                                             INTEGRAL_MAX     = 255.0f / ki;
-                                             resetMotor(motor_i);
-                                             resetMotor(motor_d); }
-    else if (nombre == "ref_min_giro")     { REF_MIN_GIRO     = (int)valor; }
-    else if (nombre == "dac_min_arranque") { DAC_MIN_ARRANQUE = (int)constrain(valor, 0, 255); }
-    else { Serial.printf("PARAM_ERR,desconocido,%s\n", nombre.c_str()); return; }
-
-    Serial.printf("PARAM_OK,%s,%.4f\n", nombre.c_str(), valor);
+void leerSerial() {
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c == '\n') {
+      procesarComando(rxLine);
+      rxLine = "";
+    } else if (c != '\r') {
+      rxLine += c;
+      if (rxLine.length() > 80) rxLine = "";  // Protección anti-desborde
+    }
   }
 }
 
@@ -334,7 +376,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(ENC_IZQ), isr_izq, RISING);
   attachInterrupt(digitalPinToInterrupt(ENC_DER), isr_der, RISING);
 
-  Serial.println("[ESP32] Listo — esperando comandos por Serial");
+  rxLine.reserve(96);
 
   t_prev = millis();
 }
@@ -345,18 +387,8 @@ void setup() {
 
 void loop() {
 
-  // — Leer comandos desde Serial (RPi) —
-  while (Serial.available()) {
-    char c = Serial.read();
-    if (c == '\n') {
-      if (serial_buf.length() > 0) {
-        procesarComando(serial_buf);
-        serial_buf = "";
-      }
-    } else if (c != '\r') {
-      serial_buf += c;
-    }
-  }
+  // — Atender comandos entrantes por serial —
+  leerSerial();
 
   unsigned long ahora = millis();
 
@@ -390,11 +422,14 @@ void loop() {
       motor_d.dac   = 0;
     }
 
-    // — Telemetría por Serial a la RPi —
-    Serial.printf("TEL,%ld,%ld,%d,%d,%.1f,%.1f,%d,%d\n",
-                  motor_i.medida, motor_d.medida,
-                  motor_i.ref,    motor_d.ref,
-                  motor_i.error,  motor_d.error,
-                  motor_i.dac,    motor_d.dac);
+    // — Telemetría por Serial (canal de datos hacia la Raspberry) —
+    char buf[80];
+    snprintf(buf, sizeof(buf),
+             "TEL,%ld,%ld,%d,%d,%.1f,%.1f,%d,%d",
+             motor_i.medida, motor_d.medida,
+             motor_i.ref,    motor_d.ref,
+             motor_i.error,  motor_d.error,
+             motor_i.dac,    motor_d.dac);
+    Serial.println(buf);
   }
 }
