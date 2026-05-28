@@ -233,10 +233,12 @@ canvas{width:100%!important;max-height:120px}
 
 <script>
 // ─── Estado ───────────────────────────────────────────────────────
-var speedVal     = 0;
+var speedVal       = 0;
 var motoresActivos = false;
-var pollInterval = null;
-var serverOk     = false;
+var pollInterval   = null;
+var serverOk       = false;
+var dpadInterval   = null;
+var dpadDir        = null;
 
 // ─── Utilidades ───────────────────────────────────────────────────
 function addLog(msg) {
