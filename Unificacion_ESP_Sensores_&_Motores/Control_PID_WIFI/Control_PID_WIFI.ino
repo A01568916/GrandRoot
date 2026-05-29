@@ -1,16 +1,36 @@
 /*
- * Control_PID_WiFi.ino
+ * Control_PID_WiFi.ino   [VERSIÓN PARCHEADA]
  * ESP32 — Control PI Posicional + Hub WebSocket para dashboard
+ *
+ * ─── CAMBIOS RESPECTO A LA VERSIÓN ANTERIOR ───────────────────────────────
+ *   [PATCH 1] Buffer RX de Serial2 ampliado a 1024 bytes ANTES del begin().
+ *             Causa principal del corte de comunicación con sensores.
+ *
+ *   [PATCH 2] Serial2.begin(...) ya no reserva GPIO 17 como TX. Pasamos -1
+ *             porque no le mandamos nada al ESP de sensores.
+ *
+ *   [PATCH 3] Encoders configurados como INPUT_PULLUP (ENC_IZQ=18).
+ *             Para ENC_DER=34 (input-only sin pull interno) se debe
+ *             agregar un RESISTOR FÍSICO de 10kΩ entre GPIO 34 y 3.3V.
+ *             Si no tienes el resistor a la mano, define DESACTIVAR_IRQS_DER
+ *             en 1 para diagnóstico — desactiva temporalmente la interrupción
+ *             del motor derecho para confirmar que el ruido en GPIO 34
+ *             era la causa del problema.
+ *
+ *   [PATCH 4] Diagnóstico en el log: además de SENS_age muestra cuántos
+ *             bytes hay en el buffer de Serial2 y cuántas IRQs disparó cada
+ *             encoder en el último ciclo. Si ves miles de IRQs/200ms en uno
+ *             de los encoders cuando el robot no se mueve → es ruido.
  *
  * ─── ARQUITECTURA ─────────────────────────────────────────────────────────
  *
  *   ESP32 SENSORES (GPS + IMU)
  *           │ Serial1 TX (GPIO 4)    JSON cada 200 ms
  *           ▼
- *   ESP32 PID (este)                    ESP32 PID también:
- *     · Serial2 RX (GPIO 16)              · Sirve dashboard HTML
- *     · WiFi AP "ESP32-Robot"             · Acepta comandos MOVE/ENABLE/PARAM
- *     · WS ws://192.168.4.1/ws            · Reenvía telemetría motores + sensores
+ *   ESP32 PID (este)
+ *     · Serial2 RX (GPIO 16)
+ *     · WiFi AP "ESP32-Robot"
+ *     · WS ws://192.168.4.1/ws
  *           ▲
  *           │ WebSocket
  *   Dashboard (navegador)
@@ -27,10 +47,6 @@
  *  Librerías Arduino IDE:
  *    - ESPAsyncWebServer  (lacamera / me-no-dev)
  *    - AsyncTCP           (dvarrel / me-no-dev)
- *
- *  Nota: NO usamos ArduinoJson aquí — solo reenviamos la línea JSON tal cual
- *  llega del ESP32 SENSORES, el dashboard la parsea con JSON.parse().
- *  Esto ahorra RAM y mantiene este firmware más simple.
  */
 
 // =====================================================
@@ -46,6 +62,16 @@ void stepPI(MotorState &m, float T);
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include "index_html.h"
+
+// =====================================================
+// SWITCH DE DIAGNÓSTICO
+// =====================================================
+// [PATCH 3] Pon en 1 SOLO para probar si el ruido en el encoder derecho
+//           (GPIO 34, input-only sin pull-up interno) es lo que bloquea
+//           el UART. Con esto desactivado el motor derecho NO contará
+//           pulsos. Es solo para diagnóstico. Vuelve a 0 cuando agregues
+//           el pull-up físico de 10kΩ entre GPIO 34 y 3.3V.
+#define DESACTIVAR_IRQS_DER  0
 
 // =====================================================
 // CONFIG RED
@@ -66,7 +92,7 @@ AsyncWebSocket ws("/ws");
 #define EN_IZQ         21
 #define EN_DER         33
 #define ENC_IZQ        18
-#define ENC_DER        34
+#define ENC_DER        34   // ⚠ input-only, NECESITA pull-up físico 10kΩ→3V3
 
 // =====================================================
 // LINK CON ESP32 SENSORES (Serial2)
@@ -74,7 +100,8 @@ AsyncWebSocket ws("/ws");
 // ESP32_SENSORES.GPIO4 (TX1) → ESP32_PID.GPIO16 (RX2)
 // GND COMÚN entre ambos ESP32 (¡obligatorio!)
 #define LINK_RX_PIN   16
-#define LINK_TX_PIN   17   // no usado pero hay que declararlo
+// [PATCH 2] Ya NO definimos LINK_TX_PIN porque no le mandamos nada al ESP
+//           de sensores. Pasamos -1 al begin() para liberar GPIO 17.
 #define LINK_BAUD     115200
 
 // =====================================================
@@ -139,9 +166,11 @@ unsigned long t_prev = 0;
 // =====================================================
 // BUFFER DEL LINK DE SENSORES
 // =====================================================
-String        linkBuffer = "";
-String        ultimoSensJSON = "";        // último JSON crudo recibido
-unsigned long t_ultimoSens   = 0;          // millis() de la última recepción
+#define LINK_BUF_SIZE   384
+char          linkBuf[LINK_BUF_SIZE];
+size_t        linkBufLen = 0;
+char          ultimoSensJSON[LINK_BUF_SIZE] = "";
+unsigned long t_ultimoSens   = 0;
 
 // =====================================================
 // RESET MOTOR
@@ -347,29 +376,35 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
 // =====================================================
 // LEER LINK SERIAL2 (datos del ESP32 SENSORES)
 // =====================================================
-// Acumula caracteres hasta encontrar '\n', luego guarda la línea
-// como `ultimoSensJSON` y la reenvía por WS prefijada con "SENS,".
-//
 void leerLinkSensores() {
   while (Serial2.available() > 0) {
     char c = (char)Serial2.read();
 
     if (c == '\n') {
-      if (linkBuffer.length() > 0 && linkBuffer.startsWith("{")) {
-        ultimoSensJSON = linkBuffer;
-        t_ultimoSens   = millis();
+      linkBuf[linkBufLen] = '\0';
 
-        // Reenviar al dashboard inmediatamente — bajo ritmo, no satura
+      if (linkBufLen > 0 && linkBuf[0] == '{') {
+        strncpy(ultimoSensJSON, linkBuf, LINK_BUF_SIZE - 1);
+        ultimoSensJSON[LINK_BUF_SIZE - 1] = '\0';
+        t_ultimoSens = millis();
+
         if (ws.count() > 0) {
-          String msg = "SENS," + ultimoSensJSON;
-          ws.textAll(msg);
+          char wsbuf[LINK_BUF_SIZE + 8];
+          int n = snprintf(wsbuf, sizeof(wsbuf), "SENS,%s", linkBuf);
+          if (n > 0 && n < (int)sizeof(wsbuf)) {
+            ws.textAll(wsbuf, n);
+          }
         }
       }
-      linkBuffer = "";
-    } else if (c != '\r') {
-      linkBuffer += c;
-      // Protección contra basura sin '\n'
-      if (linkBuffer.length() > 400) linkBuffer = "";
+
+      linkBufLen = 0;
+    }
+    else if (c != '\r') {
+      if (linkBufLen < LINK_BUF_SIZE - 1) {
+        linkBuf[linkBufLen++] = c;
+      } else {
+        linkBufLen = 0;
+      }
     }
   }
 }
@@ -381,6 +416,10 @@ void setup() {
 
   Serial.begin(115200);
 
+  Serial.println("\n============================================");
+  Serial.println("  GrandRoot — ESP32 PID [PARCHEADO]");
+  Serial.println("============================================");
+
   // Motores
   pinMode(FR_IZQ, OUTPUT);
   pinMode(FR_DER, OUTPUT);
@@ -390,13 +429,30 @@ void setup() {
   dacWrite(SV_SIGNAL_DER, 0);
   enableMotores(false);
 
-  // Encoders
-  attachInterrupt(digitalPinToInterrupt(ENC_IZQ), isr_izq, RISING);
-  attachInterrupt(digitalPinToInterrupt(ENC_DER), isr_der, RISING);
+  // [PATCH 3] Encoders con pull-up donde sea posible.
+  //   - ENC_IZQ = 18 → soporta INPUT_PULLUP interno ✅
+  //   - ENC_DER = 34 → input-only, NO tiene pull-up interno.
+  //     Hay que poner RESISTOR FÍSICO de 10kΩ entre GPIO 34 y 3.3V.
+  pinMode(ENC_IZQ, INPUT_PULLUP);
+  pinMode(ENC_DER, INPUT);   // pull-up físico obligatorio fuera del MCU
 
-  // Link al ESP32 SENSORES
-  Serial2.begin(LINK_BAUD, SERIAL_8N1, LINK_RX_PIN, LINK_TX_PIN);
-  Serial.printf("[LINK] Serial2 RX=%d ← ESP32 SENSORES @ %d baud\n",
+  attachInterrupt(digitalPinToInterrupt(ENC_IZQ), isr_izq, RISING);
+#if DESACTIVAR_IRQS_DER
+  Serial.println("[ENCODER] ⚠ IRQ derecha DESACTIVADA (modo diagnóstico)");
+#else
+  attachInterrupt(digitalPinToInterrupt(ENC_DER), isr_der, RISING);
+#endif
+
+  // [PATCH 1] Aumentar buffer RX de Serial2 ANTES del begin().
+  //           Sin esto, si el loop se atrasa un instante (por WS, por IRQs
+  //           del encoder, etc.) se desbordan los 256 bytes default y se
+  //           pierden líneas completas del JSON. Causa #1 del corte.
+  Serial2.setRxBufferSize(1024);
+
+  // [PATCH 2] Link al ESP32 SENSORES — pasamos -1 como TX porque no le
+  //           mandamos nada al sensor. Esto libera GPIO 17.
+  Serial2.begin(LINK_BAUD, SERIAL_8N1, LINK_RX_PIN, -1);
+  Serial.printf("[LINK] Serial2 RX=%d ← ESP32 SENSORES @ %d baud, bufferRX=1024\n",
                 LINK_RX_PIN, LINK_BAUD);
 
   // WiFi AP
@@ -409,16 +465,11 @@ void setup() {
   server.addHandler(&ws);
 
   // HTTP
-  // El HTML embebido pesa ~430 KB con Leaflet y Chart.js dentro,
-  // demasiado para send_P() que intentaría tenerlo todo en RAM.
-  // Usamos un chunked response que lee directamente de PROGMEM
-  // de a pedacitos. Cada cliente lleva su propio índice en `index`.
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     const size_t total = strlen_P(INDEX_HTML);
     AsyncWebServerResponse *response = request->beginChunkedResponse(
       "text/html",
       [total](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
-        // index = bytes ya enviados; maxLen = espacio disponible ahora
         if (index >= total) return 0;
         size_t restante = total - index;
         size_t n = (restante < maxLen) ? restante : maxLen;
@@ -430,12 +481,10 @@ void setup() {
     request->send(response);
   });
 
-  // Favicon vacío para evitar 404 spammeando la consola del navegador
   server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(204);
   });
 
-  // Handler para cualquier otra ruta — responde 404 limpio sin spam
   server.onNotFound([](AsyncWebServerRequest *request) {
     request->send(404, "text/plain", "Not Found");
   });
@@ -499,12 +548,24 @@ void loop() {
       ws.textAll(buf);
     }
 
-    // Log USB
-    Serial.printf("TEL,%ld,%ld,%d,%d,%.1f,%.1f,%d,%d  |  SENS_age=%lums\n",
+    // [PATCH 4] Log de diagnóstico ampliado.
+    //   - SENS_age: ms desde el último JSON recibido. Si crece sin parar → no
+    //               llegan bytes (cableado, GND, o se desactivó el otro ESP).
+    //   - rx_avail: bytes en el buffer de Serial2 ahora mismo. Si oscila
+    //               cerca de 1024 → buffer al límite, el loop no está
+    //               vaciándolo a tiempo.
+    //   - pulse_i / pulse_d: pulsos contados en este ciclo. Si el robot
+    //               está QUIETO y ves valores grandes (cientos) en pulse_d
+    //               → ruido en GPIO 34, agrega el pull-up.
+    Serial.printf("TEL,%ld,%ld,%d,%d,%.1f,%.1f,%d,%d  |  SENS_age=%lums  "
+                  "rx_avail=%d  pulse_i=%ld pulse_d=%ld  heap=%u\n",
                   motor_i.medida, motor_d.medida,
                   motor_i.ref,    motor_d.ref,
                   motor_i.error,  motor_d.error,
                   motor_i.dac,    motor_d.dac,
-                  ahora - t_ultimoSens);
+                  ahora - t_ultimoSens,
+                  Serial2.available(),
+                  pi, pd,
+                  ESP.getFreeHeap());
   }
 }

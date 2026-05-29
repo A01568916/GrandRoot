@@ -61,6 +61,13 @@
 // Cada cuántos ms enviamos un paquete al ESP32 PID
 #define INTERVALO_MS  200
 
+// ── DEBUG ────────────────────────────────────────────────────────────────────
+// Si está en 1, además de mandar el JSON por Serial1 (al PID), lo imprime
+// también por USB-Serial para que puedas verlo en el Monitor del Arduino IDE.
+// Útil para ver si el GPS tiene fix y qué coordenadas saca.
+// Pon en 0 cuando ya no necesites debug (ahorra CPU).
+#define DEBUG_USB     1
+
 // Punto de referencia GPS para X/Y locales en metros
 const double LAT_REF = 28.7385775000;
 const double LON_REF = -106.1217361670;
@@ -207,6 +214,7 @@ void leerIMU() {
 //   ts       : millis() del ESP32 (para detectar pérdidas)
 //
 void publicarJSON() {
+  // 1) Salida real al ESP32 PID por Serial1
   Serial1.printf(
     "{\"lat\":%.10f,\"lon\":%.10f,\"x\":%.3f,\"y\":%.3f,"
     "\"sats\":%u,\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,"
@@ -221,6 +229,23 @@ void publicarJSON() {
     imuData.ok ? 1 : 0,
     millis()
   );
+
+  // 2) Si DEBUG_USB está activo, también lo imprimimos por USB
+  //    en un formato legible para el Monitor Serie.
+#if DEBUG_USB
+  Serial.printf(
+    "[%lums] GPS:%s sats=%u  lat=%.7f lon=%.7f  X=%.2f Y=%.2f  | "
+    "IMU:%s  ax=%.2f ay=%.2f az=%.2f  gz=%.1f\n",
+    millis(),
+    gpsData.ok ? "FIX" : "---",
+    gpsData.sats,
+    gpsData.lat, gpsData.lon,
+    gpsData.x, gpsData.y,
+    imuData.ok ? "OK " : "---",
+    imuData.ax, imuData.ay, imuData.az,
+    imuData.gz
+  );
+#endif
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
