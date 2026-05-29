@@ -1,0 +1,1297 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GrandRoot — Panel de Control</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #111318;
+      --surface:   #1a1d24;
+      --surface2:  #21252e;
+      --border:    #2e3340;
+      --green:     #00c896;
+      --green-dim: #004d3a;
+      --yellow:    #ffb400;
+      --red:       #ff3b30;
+      --blue:      #0a84ff;
+      --text:      #e2e6ef;
+      --text-dim:  #7a8296;
+      --radius:    8px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', 'Inter', system-ui, sans-serif;
+      font-size: 13px;
+      overflow: hidden;
+    }
+
+    /* ══ LAYOUT ═══════════════════════════════════════════════ */
+    .app {
+      display: grid;
+      grid-template-rows: 48px 1fr 58px;
+      height: 100vh;
+    }
+
+    /* ══ HEADER ════════════════════════════════════════════════ */
+    header {
+      background: #0e1016;
+      border-bottom: 2px solid var(--green);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 16px;
+      z-index: 1000;
+    }
+    .logo {
+      font-size: 15px; font-weight: 800;
+      color: var(--green); letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+    .logo span { color: var(--text-dim); font-weight: 400; font-size: 12px; margin-left: 6px; }
+    .spacer { flex: 1; }
+
+    .conn-badge {
+      display: flex; align-items: center; gap: 7px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 4px; padding: 5px 14px;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.8px;
+    }
+    .conn-dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--red); transition: background 0.3s;
+    }
+    .conn-dot.live { background: var(--green); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+    .time-display {
+      font-size: 13px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--text); letter-spacing: 1px;
+    }
+
+    /* ══ MAIN GRID ═════════════════════════════════════════════ */
+    .main {
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      overflow: hidden;
+    }
+
+    /* ══ PANEL IZQUIERDO ═══════════════════════════════════════ */
+    .left-panel {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .left-panel::-webkit-scrollbar { width: 4px; }
+    .left-panel::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .sec {
+      border-bottom: 1px solid var(--border);
+      padding: 12px 16px;
+    }
+    .sec:last-child { border-bottom: none; }
+    .sec-title {
+      font-size: 9px; font-weight: 800; letter-spacing: 1.6px;
+      text-transform: uppercase; color: var(--text-dim);
+      margin-bottom: 10px;
+    }
+
+    /* ── Modo operación ───── */
+    .mode-toggle {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .mode-btn {
+      padding: 14px 8px;
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 13px; font-weight: 800;
+      letter-spacing: 0.6px; text-transform: uppercase;
+      background: var(--bg); color: var(--text-dim);
+      transition: all 0.15s;
+    }
+    .mode-btn.active-auto {
+      background: var(--green-dim);
+      border-color: var(--green);
+      color: var(--green);
+      box-shadow: 0 0 12px #00c89633;
+    }
+    .mode-btn.active-manual {
+      background: #3a2100;
+      border-color: var(--yellow);
+      color: var(--yellow);
+      box-shadow: 0 0 12px #ffb40033;
+    }
+    .mode-chip {
+      margin-top: 8px;
+      padding: 7px 12px;
+      border-radius: 4px;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+    }
+    .mode-chip.auto   { background: #002a1f; color: var(--green);  border-left: 3px solid var(--green); }
+    .mode-chip.manual { background: #2e1a00; color: var(--yellow); border-left: 3px solid var(--yellow); }
+
+    /* ── Control de motores ───── */
+    .motor-row {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 6px; margin-bottom: 8px;
+    }
+    .motor-action-btn {
+      padding: 13px 8px;
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 12px; font-weight: 800;
+      letter-spacing: 0.8px; text-transform: uppercase;
+      background: var(--bg); color: var(--text-dim);
+      transition: all 0.15s;
+    }
+    .motor-action-btn.activar {
+      background: var(--green-dim);
+      border-color: var(--green);
+      color: var(--green);
+    }
+    .motor-action-btn.activar:hover { background: #005c43; }
+    .motor-action-btn.activar:active { background: var(--green); color: #000; }
+    .motor-action-btn.detener {
+      background: #220808;
+      border-color: var(--red);
+      color: var(--red);
+    }
+    .motor-action-btn.detener:hover { background: #3d0a0a; }
+    .motor-action-btn.detener:active { background: var(--red); color: #fff; }
+
+    .motor-status {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 10px;
+      background: var(--surface2); border-radius: 4px;
+    }
+    .motor-led {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--text-dim); transition: background 0.3s;
+      flex-shrink: 0;
+    }
+    .motor-led.on  { background: var(--green); animation: pulse 1.5s infinite; }
+    .motor-led.off { background: var(--red); }
+    .motor-status-label {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.8px;
+      text-transform: uppercase; color: var(--text-dim);
+    }
+
+    /* ── Telemetría ── */
+    .telem-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+    .tcard {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 10px 8px;
+      text-align: center;
+    }
+    .tcard-label {
+      font-size: 9px; font-weight: 700; letter-spacing: 1px;
+      text-transform: uppercase; color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .tcard-value {
+      font-size: 22px; font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+    .tcard-unit { font-size: 10px; color: var(--text-dim); font-weight: 500; }
+    .tcard-value.good  { color: var(--green); }
+    .tcard-value.warn  { color: var(--yellow); }
+    .tcard-value.bad   { color: var(--red); }
+
+    .conf-row {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 6px;
+    }
+    .conf-label { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
+    .conf-bar-bg {
+      flex: 1; height: 7px; background: var(--border);
+      border-radius: 4px; overflow: hidden;
+    }
+    .conf-bar-fill {
+      height: 100%; border-radius: 4px;
+      background: var(--green);
+      transition: width 0.35s ease, background 0.3s;
+    }
+    .conf-val {
+      font-size: 12px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      min-width: 36px; text-align: right;
+    }
+
+    /* ── D-pad ─────── */
+    .dpad-center {
+      display: flex;
+      justify-content: center;
+    }
+    .dpad {
+      display: grid;
+      grid-template-areas: ". up ." "left stop right" ". down .";
+      grid-template-columns: repeat(3, 58px);
+      grid-template-rows: repeat(3, 58px);
+      gap: 5px;
+    }
+    .dpad-btn {
+      background: var(--surface2);
+      border: 1.5px solid var(--border);
+      color: var(--text);
+      border-radius: var(--radius);
+      font-size: 20px;
+      cursor: pointer;
+      transition: background 0.1s, border-color 0.1s, transform 0.08s;
+      display: flex; align-items: center; justify-content: center;
+      user-select: none;
+    }
+    .dpad-btn:hover   { background: #272c38; border-color: #4a5160; }
+    .dpad-btn.pressed {
+      background: var(--green-dim); border-color: var(--green);
+      color: var(--green); transform: scale(0.92);
+    }
+    .dpad-btn.stop-btn { font-size: 11px; font-weight: 800; letter-spacing: 0.5px; }
+    .dpad-btn.stop-btn.pressed { background: #400; border-color: var(--red); color: var(--red); }
+    [data-dir="up"]    { grid-area: up; }
+    [data-dir="left"]  { grid-area: left; }
+    [data-dir="stop"]  { grid-area: stop; }
+    [data-dir="right"] { grid-area: right; }
+    [data-dir="down"]  { grid-area: down; }
+    .dpad-disabled { opacity: 0.2; pointer-events: none; }
+
+    .dpad-hint {
+      text-align: center; margin-top: 8px;
+      font-size: 10px; color: var(--text-dim);
+    }
+
+    /* ══ ÁREA DERECHA: mapa ════════════════════════════════════ */
+    .right-area {
+      overflow: hidden;
+      position: relative;
+    }
+    #map { width: 100%; height: 100%; }
+    .leaflet-control-attribution,
+    .leaflet-control-zoom { display: none !important; }
+    .leaflet-container {
+      background: #111318 !important;
+      font-family: inherit;
+    }
+    .leaflet-tile-container img { outline: none !important; border: none !important; }
+    .leaflet-tile { border: none !important; outline: none !important; }
+
+    .map-zoom {
+      position: absolute; bottom: 10px; right: 10px;
+      z-index: 500;
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .map-zoom-btn {
+      width: 34px; height: 34px;
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px;
+      font-size: 18px; font-weight: 700;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: background 0.1s;
+    }
+    .map-zoom-btn:hover { background: #272c38; }
+
+    .map-center-btn {
+      position: absolute; bottom: 10px; left: 10px;
+      z-index: 500;
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px;
+      padding: 6px 10px; font-size: 11px; font-weight: 700;
+      cursor: pointer; transition: background 0.1s;
+    }
+    .map-center-btn:hover { background: #272c38; }
+
+    .map-mode-btn {
+      position: absolute; top: 10px; right: 10px;
+      z-index: 500;
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text-dim); border-radius: 6px;
+      padding: 5px 10px; font-size: 10px; font-weight: 700;
+      letter-spacing: 0.6px; text-transform: uppercase;
+      cursor: pointer; transition: background 0.1s, color 0.1s;
+    }
+    .map-mode-btn.offline { border-color: var(--yellow); color: var(--yellow); }
+
+    /* ══ FOOTER ══════════════════════════════════════════════ */
+    .app-footer {
+      display: flex;
+      align-items: stretch;
+      border-top: 2px solid var(--red);
+      background: var(--surface);
+      z-index: 900;
+    }
+    .footer-estop {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+    }
+    .estop-btn {
+      height: 100%;
+      border-radius: 0;
+      border: none;
+      border-right: 2px solid var(--red);
+      padding: 0 28px;
+      background: #220808;
+      color: var(--red);
+      font-size: 14px; font-weight: 800;
+      letter-spacing: 1.5px; text-transform: uppercase;
+      cursor: pointer; transition: background 0.12s;
+    }
+    .estop-btn:hover  { background: #3d0a0a; }
+    .estop-btn:active { background: var(--red); color: #fff; }
+
+    .gps-strip {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+    }
+    .gps-cell {
+      padding: 6px 16px;
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; justify-content: center;
+    }
+    .gps-cell:last-child { border-right: none; }
+    .gps-cell-label {
+      font-size: 9px; font-weight: 700; letter-spacing: 1.2px;
+      text-transform: uppercase; color: var(--text-dim);
+      margin-bottom: 2px;
+    }
+    .gps-cell-value {
+      font-size: 14px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      font-family: 'Courier New', monospace;
+      color: var(--text);
+    }
+    .gps-cell-value.good { color: var(--green); }
+
+    /* ══ BOTÓN ADMIN ══════════════════════════════════════════ */
+    .admin-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 14px;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .admin-btn:hover { border-color: var(--yellow); color: var(--yellow); }
+
+    /* ══ OVERLAY / MODAL LOGIN ════════════════════════════════ */
+    .overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.72);
+      z-index: 9000;
+      align-items: center; justify-content: center;
+    }
+    .overlay.visible { display: flex; }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px 32px;
+      width: 320px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .modal-title {
+      font-size: 13px; font-weight: 800; letter-spacing: 1.2px;
+      text-transform: uppercase; color: var(--text);
+    }
+    .modal input[type="password"] {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 14px; color: var(--text);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .modal input[type="password"]:focus { border-color: var(--green); }
+    .modal-error {
+      font-size: 11px; color: var(--red);
+      min-height: 16px;
+    }
+    .modal-actions {
+      display: flex; gap: 8px; justify-content: flex-end;
+    }
+    .modal-cancel {
+      background: transparent; border: 1px solid var(--border);
+      color: var(--text-dim); border-radius: 6px;
+      padding: 8px 18px; font-size: 12px; font-weight: 700;
+      cursor: pointer; transition: border-color 0.15s;
+    }
+    .modal-cancel:hover { border-color: var(--text-dim); }
+    .modal-confirm {
+      background: var(--green-dim); border: 1px solid var(--green);
+      color: var(--green); border-radius: 6px;
+      padding: 8px 18px; font-size: 12px; font-weight: 700;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .modal-confirm:hover { background: #005c43; }
+
+    /* ══ PANEL TÉCNICO (ventana flotante) ════════════════════ */
+    .tech-panel {
+      display: none;
+      position: fixed;
+      top: 58px; right: 18px;
+      width: 420px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      z-index: 8000;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .tech-panel.visible { display: flex; }
+
+    .tech-header {
+      display: flex; align-items: center;
+      padding: 10px 16px;
+      background: #0e1016;
+      border-bottom: 1px solid var(--border);
+      gap: 10px;
+    }
+    .tech-header-title {
+      font-size: 10px; font-weight: 800; letter-spacing: 1.4px;
+      text-transform: uppercase; color: var(--yellow);
+      flex: 1;
+    }
+    .tech-close {
+      background: transparent; border: none;
+      color: var(--text-dim); font-size: 18px;
+      cursor: pointer; line-height: 1; padding: 0 2px;
+      transition: color 0.1s;
+    }
+    .tech-close:hover { color: var(--red); }
+
+    .tech-body {
+      padding: 14px 16px;
+      display: flex; flex-direction: column; gap: 14px;
+      overflow-y: auto; max-height: calc(100vh - 120px);
+    }
+    .tech-body::-webkit-scrollbar { width: 4px; }
+    .tech-body::-webkit-scrollbar-thumb { background: var(--border); }
+
+    /* ── Sección dentro del panel ── */
+    .tech-sec-title {
+      font-size: 9px; font-weight: 800; letter-spacing: 1.6px;
+      text-transform: uppercase; color: var(--text-dim);
+      margin-bottom: 8px;
+    }
+
+    /* ── Grilla de valores de telemetría ── */
+    .tel-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+    .tel-grid.two-col { grid-template-columns: repeat(2, 1fr); }
+
+    .tel-cell {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+    .tel-cell-label {
+      font-size: 9px; font-weight: 700; letter-spacing: 0.9px;
+      text-transform: uppercase; color: var(--text-dim);
+      margin-bottom: 3px;
+    }
+    .tel-cell-value {
+      font-size: 18px; font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      font-family: 'Courier New', monospace;
+      color: var(--text); line-height: 1;
+    }
+    .tel-cell-value.good { color: var(--green); }
+    .tel-cell-value.warn { color: var(--yellow); }
+    .tel-cell-value.bad  { color: var(--red); }
+    .tel-cell-unit {
+      font-size: 9px; color: var(--text-dim); font-weight: 500;
+    }
+
+    /* ── Parámetros editables ── */
+    .param-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .param-row {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .param-label {
+      font-size: 9px; font-weight: 700; letter-spacing: 0.9px;
+      text-transform: uppercase; color: var(--text-dim);
+    }
+    .param-input-row {
+      display: flex; gap: 6px; align-items: center;
+    }
+    .param-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-size: 13px; font-weight: 700;
+      font-family: 'Courier New', monospace;
+      color: var(--green);
+      outline: none; width: 0;
+      transition: border-color 0.15s;
+    }
+    .param-input:focus { border-color: var(--green); }
+    .param-apply {
+      background: var(--green-dim);
+      border: 1px solid var(--green);
+      color: var(--green);
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 10px; font-weight: 800;
+      cursor: pointer; white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .param-apply:hover { background: #005c43; }
+    .param-current {
+      font-size: 10px; color: var(--text-dim);
+      font-family: 'Courier New', monospace;
+    }
+
+    /* ── Terminal de log ── */
+    .log-terminal {
+      background: #0a0c0f;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      height: 140px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      line-height: 1.55;
+    }
+    .log-terminal::-webkit-scrollbar { width: 4px; }
+    .log-terminal::-webkit-scrollbar-thumb { background: #2a3040; }
+    .log-line { color: #7a8296; }
+    .log-line.ok   { color: var(--green); }
+    .log-line.warn { color: var(--yellow); }
+    .log-line.err  { color: var(--red); }
+    .log-line.info { color: #0a84ff; }
+  </style>
+
+  <script>
+   (function() {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.socket.io/4.4.1/socket.io.min.js';
+      s.onerror = () => window.__NO_BACKEND = true;
+      document.head.appendChild(s);
+   })();
+  </script>
+</head>
+<body>
+<div class="app">
+
+  <!-- ══ HEADER ══════════════════════════════════════════════════ -->
+  <header>
+    <div class="logo">GrandRoot <span>Panel de Control</span></div>
+    <div class="spacer"></div>
+    <div class="time-display" id="clock">--:--:--</div>
+    <button class="admin-btn" onclick="abrirLogin()">⚙ Admin</button>
+    <div class="conn-badge">
+      <div class="conn-dot" id="conn-dot"></div>
+      <span id="conn-text">DESCONECTADO</span>
+    </div>
+  </header>
+
+  <!-- ══ MAIN ════════════════════════════════════════════════════ -->
+  <div class="main">
+
+    <!-- ══ PANEL IZQUIERDO ══════════════════════════════════════ -->
+    <div class="left-panel">
+
+      <!-- Modo de operación -->
+      <div class="sec">
+        <div class="sec-title">Modo de operación</div>
+        <div class="mode-toggle">
+          <button class="mode-btn active-auto" id="btn-auto"   onclick="setMode('auto')">⚡ Automático</button>
+          <button class="mode-btn"             id="btn-manual" onclick="setMode('manual')">🕹 Manual</button>
+        </div>
+        <div class="mode-chip auto" id="mode-chip">
+          Navegación autónoma — U-Net controla el robot
+        </div>
+      </div>
+
+      <!-- Control de motores -->
+      <div class="sec">
+        <div class="sec-title">Control de motores</div>
+        <div class="motor-row">
+          <button class="motor-action-btn activar" onclick="startMotors()">▶ Activar</button>
+          <button class="motor-action-btn detener" onclick="stopMotors()">■ Detener</button>
+        </div>
+        <div class="motor-status">
+          <div class="motor-led" id="motor-led"></div>
+          <span class="motor-status-label" id="motor-status-label">Motores inactivos</span>
+        </div>
+      </div>
+
+      <!-- Telemetría -->
+      <div class="sec">
+        <div class="sec-title">Telemetría</div>
+        <div class="telem-row">
+          <div class="tcard">
+            <div class="tcard-label">Velocidad</div>
+            <div class="tcard-value good" id="tval-speed">0.00 <span class="tcard-unit">m/s</span></div>
+          </div>
+          <div class="tcard">
+            <div class="tcard-label">Rumbo</div>
+            <div class="tcard-value" id="tval-heading">0 <span class="tcard-unit">°</span></div>
+          </div>
+          <div class="tcard">
+            <div class="tcard-label">Ángulo U-Net</div>
+            <div class="tcard-value" id="tval-angle">+0.0 <span class="tcard-unit">°</span></div>
+          </div>
+        </div>
+        <div class="conf-row" style="margin-top:10px">
+          <div class="conf-label">CONFIANZA</div>
+          <div class="conf-bar-bg">
+            <div class="conf-bar-fill" id="conf-bar" style="width:0%"></div>
+          </div>
+          <div class="conf-val" id="tval-conf">0%</div>
+        </div>
+      </div>
+
+      <!-- Control manual -->
+      <div class="sec">
+        <div class="sec-title">Control manual &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0">W A S D / flechas</span></div>
+        <div class="dpad-center">
+          <div class="dpad" id="dpad">
+            <button class="dpad-btn" data-dir="up"    title="W / ↑">▲</button>
+            <button class="dpad-btn" data-dir="left"  title="A / ←">◀</button>
+            <button class="dpad-btn stop-btn" data-dir="stop" title="Espacio">STOP</button>
+            <button class="dpad-btn" data-dir="right" title="D / →">▶</button>
+            <button class="dpad-btn" data-dir="down"  title="S / ↓">▼</button>
+          </div>
+        </div>
+        <div class="dpad-hint">Flechas del teclado · W A S D · Espacio = STOP</div>
+      </div>
+
+    </div><!-- /left-panel -->
+
+    <!-- ══ ÁREA DERECHA: mapa ════════════════════════════════════ -->
+    <div class="right-area">
+      <div id="map"></div>
+
+      <div class="map-zoom">
+        <button class="map-zoom-btn" onclick="map.zoomIn()">+</button>
+        <button class="map-zoom-btn" onclick="map.zoomOut()">−</button>
+      </div>
+      <button class="map-center-btn" onclick="centerOnRobot()">⊙ Centrar</button>
+      <button class="map-mode-btn" id="map-mode-btn" onclick="toggleMapMode()">&#127760; Online</button>
+    </div>
+
+  </div><!-- /main -->
+
+  <!-- ══ FOOTER ═══════════════════════════════════════════════════ -->
+  <div class="app-footer">
+    <div class="footer-estop">
+      <button class="estop-btn" onclick="emergencyStop()">⛔ &nbsp; Parada de emergencia</button>
+    </div>
+    <div class="gps-strip">
+      <div class="gps-cell">
+        <div class="gps-cell-label">Latitud</div>
+        <div class="gps-cell-value" id="gps-lat">---.------</div>
+      </div>
+      <div class="gps-cell">
+        <div class="gps-cell-label">Longitud</div>
+        <div class="gps-cell-value" id="gps-lon">---.------</div>
+      </div>
+      <div class="gps-cell">
+        <div class="gps-cell-label">Altitud</div>
+        <div class="gps-cell-value" id="gps-alt">--- m</div>
+      </div>
+      <div class="gps-cell">
+        <div class="gps-cell-label">Fix GPS</div>
+        <div class="gps-cell-value good" id="gps-fix">---</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<script>
+/* ══ MAPA ═══════════════════════════════════════════════════════ */
+const DEFAULT_LAT = 28.6353;
+const DEFAULT_LON = -106.0889;
+
+const map = L.map('map', {
+  center: [DEFAULT_LAT, DEFAULT_LON],
+  zoom: 18,
+  zoomControl: false,
+  attributionControl: false
+});
+
+const onlineTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 21, maxNativeZoom: 19,
+  errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+});
+
+const offlineGrid = L.GridLayer.extend({
+  createTile(coords) {
+    const tile = document.createElement('canvas');
+    const size = this.getTileSize();
+    tile.width = size.x; tile.height = size.y;
+    const ctx = tile.getContext('2d');
+    ctx.fillStyle = '#111318'; ctx.fillRect(0, 0, size.x, size.y);
+    ctx.strokeStyle = '#1e2230'; ctx.lineWidth = 1;
+    const step = size.x / 4;
+    for (let x = 0; x <= size.x; x += step) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,size.y); ctx.stroke(); }
+    for (let y = 0; y <= size.y; y += step) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(size.x,y); ctx.stroke(); }
+    ctx.fillStyle = '#2a3040'; ctx.font = '10px monospace';
+    ctx.fillText(`${coords.z}/${coords.x}/${coords.y}`, 4, 12);
+    return tile;
+  }
+});
+const offlineTilesLayer = new offlineGrid({ opacity: 1 });
+
+let mapOnline = true;
+function setMapMode(online) {
+  mapOnline = online;
+  const btn = document.getElementById('map-mode-btn');
+  if (online) {
+    map.removeLayer(offlineTilesLayer);
+    onlineTiles.addTo(map);
+    btn.textContent = '\uD83C\uDF10 Online';
+    btn.classList.remove('offline');
+  } else {
+    map.removeLayer(onlineTiles);
+    offlineTilesLayer.addTo(map);
+    btn.textContent = '\uD83D\uDCF4 Sin internet';
+    btn.classList.add('offline');
+  }
+}
+function toggleMapMode() { setMapMode(!mapOnline); }
+
+fetch('https://tile.openstreetmap.org/favicon.ico', { mode: 'no-cors', cache: 'no-cache' })
+  .then(() => setMapMode(true))
+  .catch(() => setMapMode(false));
+onlineTiles.addTo(map);
+
+const robotIcon = L.divIcon({
+  className: '',
+  html: `<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="14" cy="14" r="13" fill="#161b22" stroke="#3fb950" stroke-width="2"/>
+    <polygon points="14,5 20,21 14,17 8,21" fill="#3fb950"/>
+  </svg>`,
+  iconSize: [28, 28],
+  iconAnchor: [14, 14]
+});
+const robotMarker = L.marker([DEFAULT_LAT, DEFAULT_LON], { icon: robotIcon }).addTo(map);
+const trajectory = L.polyline([], {
+  color: '#3fb950', weight: 2, opacity: 0.6, dashArray: '4 4'
+}).addTo(map);
+
+function centerOnRobot() { map.setView(robotMarker.getLatLng(), map.getZoom()); }
+
+/* ══ ESTADO ══════════════════════════════════════════════════════ */
+let mode = 'auto';
+let connected = false;
+let motorsOn = false;
+
+/* ══ RELOJ ═══════════════════════════════════════════════════════ */
+function updateClock() {
+  document.getElementById('clock').textContent = new Date().toTimeString().slice(0, 8);
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+/* ══ MODO ════════════════════════════════════════════════════════ */
+function setMode(m) {
+  mode = m;
+  const btnAuto   = document.getElementById('btn-auto');
+  const btnManual = document.getElementById('btn-manual');
+  const chip      = document.getElementById('mode-chip');
+  const dpad      = document.getElementById('dpad');
+
+  btnAuto.classList.remove('active-auto');
+  btnManual.classList.remove('active-manual');
+
+  if (m === 'auto') {
+    btnAuto.classList.add('active-auto');
+    chip.className = 'mode-chip auto';
+    chip.textContent = 'Navegación autónoma — U-Net controla el robot';
+    dpad.classList.add('dpad-disabled');
+  } else {
+    btnManual.classList.add('active-manual');
+    chip.className = 'mode-chip manual';
+    chip.textContent = 'Control manual activo — usa W A S D o flechas';
+    dpad.classList.remove('dpad-disabled');
+  }
+  if (window.socket) window.socket.emit('set_mode', { mode: m });
+}
+setMode('auto');
+
+/* ══ MOTORES ═════════════════════════════════════════════════════ */
+function startMotors() {
+  motorsOn = true;
+  const led = document.getElementById('motor-led');
+  const lbl = document.getElementById('motor-status-label');
+  led.classList.remove('off'); led.classList.add('on');
+  lbl.textContent = 'Motores activos';
+  lbl.style.color = 'var(--green)';
+  if (window.socket) window.socket.emit('motor_cmd', { action: 'start' });
+}
+function stopMotors() {
+  motorsOn = false;
+  const led = document.getElementById('motor-led');
+  const lbl = document.getElementById('motor-status-label');
+  led.classList.remove('on'); led.classList.add('off');
+  lbl.textContent = 'Motores detenidos';
+  lbl.style.color = 'var(--red)';
+  if (window.socket) window.socket.emit('motor_cmd', { action: 'stop' });
+}
+
+/* ══ PARADA DE EMERGENCIA ════════════════════════════════════════ */
+function emergencyStop() {
+  if (window.socket) window.socket.emit('emergency_stop');
+  stopMotors();
+  setMode('manual');
+  updateTelemetry({ speed: 0, angle: 0, conf: 0 });
+  alert('⛔ Parada de emergencia enviada.');
+}
+
+/* ══ TELEMETRÍA ══════════════════════════════════════════════════ */
+function updateTelemetry({ speed, heading, angle, conf, lat, lon, alt }) {
+  if (speed !== undefined) {
+    const el = document.getElementById('tval-speed');
+    el.innerHTML = speed.toFixed(2) + ' <span class="tcard-unit">m/s</span>';
+    el.className = 'tcard-value ' + (speed < 0.01 ? '' : speed < 0.5 ? 'warn' : 'good');
+  }
+  if (heading !== undefined)
+    document.getElementById('tval-heading').innerHTML =
+      Math.round(heading) + ' <span class="tcard-unit">°</span>';
+
+  if (angle !== undefined) {
+    const el = document.getElementById('tval-angle');
+    el.innerHTML = (angle >= 0 ? '+' : '') + angle.toFixed(1) + ' <span class="tcard-unit">°</span>';
+    el.className = 'tcard-value ' +
+      (Math.abs(angle) < 5 ? 'good' : Math.abs(angle) < 20 ? 'warn' : 'bad');
+  }
+  if (conf !== undefined) {
+    const pct = Math.round(conf * 100);
+    document.getElementById('tval-conf').textContent = pct + '%';
+    const bar = document.getElementById('conf-bar');
+    bar.style.width = pct + '%';
+    bar.style.background = pct > 60 ? 'var(--green)' : pct > 30 ? 'var(--yellow)' : 'var(--red)';
+  }
+  if (lat !== undefined && lon !== undefined) {
+    document.getElementById('gps-lat').textContent = lat.toFixed(6);
+    document.getElementById('gps-lon').textContent = lon.toFixed(6);
+    if (alt !== undefined)
+      document.getElementById('gps-alt').textContent = alt.toFixed(1) + ' m';
+    document.getElementById('gps-fix').textContent = 'OK';
+    robotMarker.setLatLng([lat, lon]);
+    trajectory.addLatLng([lat, lon]);
+    if (trajectory.getLatLngs().length < 3) map.setView([lat, lon]);
+  }
+}
+
+/* ══ D-PAD ═══════════════════════════════════════════════════════ */
+document.querySelectorAll('.dpad-btn').forEach(btn => {
+  btn.addEventListener('mousedown',  () => onDpadDown(btn.dataset.dir, btn));
+  btn.addEventListener('mouseup',    () => onDpadUp(btn));
+  btn.addEventListener('mouseleave', () => onDpadUp(btn));
+  btn.addEventListener('touchstart', e => { e.preventDefault(); onDpadDown(btn.dataset.dir, btn); }, { passive: false });
+  btn.addEventListener('touchend',   () => onDpadUp(btn));
+});
+
+function onDpadDown(dir, btn) {
+  if (mode !== 'manual') return;
+  btn.classList.add('pressed');
+  if (window.socket) window.socket.emit('manual_cmd', dpadToVelocity(dir));
+}
+function onDpadUp(btn) {
+  btn.classList.remove('pressed');
+  if (window.socket) window.socket.emit('manual_cmd', { x: 0, y: 0 });
+}
+function dpadToVelocity(dir) {
+  return { up:{x:0,y:1}, down:{x:0,y:-1}, left:{x:-1,y:0}, right:{x:1,y:0}, stop:{x:0,y:0} }[dir] || {x:0,y:0};
+}
+
+/* ══ TECLADO ═════════════════════════════════════════════════════ */
+const KEY_DIR = {
+  'ArrowUp':'up', 'w':'up',
+  'ArrowDown':'down', 's':'down',
+  'ArrowLeft':'left', 'a':'left',
+  'ArrowRight':'right', 'd':'right',
+  ' ':'stop'
+};
+document.addEventListener('keydown', e => {
+  if (mode !== 'manual') return;
+  const dir = KEY_DIR[e.key];
+  if (!dir) return;
+  e.preventDefault();
+  const btn = document.querySelector(`.dpad-btn[data-dir="${dir}"]`);
+  if (btn && !btn.classList.contains('pressed')) {
+    btn.classList.add('pressed');
+    if (window.socket) window.socket.emit('manual_cmd', dpadToVelocity(dir));
+  }
+});
+document.addEventListener('keyup', e => {
+  const dir = KEY_DIR[e.key];
+  if (!dir) return;
+  const btn = document.querySelector(`.dpad-btn[data-dir="${dir}"]`);
+  if (btn) {
+    btn.classList.remove('pressed');
+    if (window.socket) window.socket.emit('manual_cmd', { x: 0, y: 0 });
+  }
+});
+
+/* ══ BACKEND / SIMULACIÓN ════════════════════════════════════════ */
+let simInterval = null;
+
+function startSimulation() {
+  if (simInterval) return;
+  let simT = 0, simLat = DEFAULT_LAT, simLon = DEFAULT_LON;
+  simInterval = setInterval(() => {
+    simT += 0.08;
+    simLat += 0.000005 + Math.sin(simT * 0.3) * 0.000002;
+    simLon += 0.000003 + Math.cos(simT * 0.2) * 0.000001;
+    updateTelemetry({
+      speed:   0.3 + Math.sin(simT) * 0.15,
+      heading: (simT * 8) % 360,
+      angle:   Math.sin(simT * 0.7) * 12,
+      conf:    0.55 + Math.sin(simT * 0.4) * 0.35,
+      lat: simLat, lon: simLon, alt: 1430
+    });
+    if (!connected && simT > 1.5) {
+      connected = true;
+      document.getElementById('conn-dot').classList.add('live');
+      document.getElementById('conn-text').textContent = 'SIMULACIÓN';
+    }
+  }, 100);
+}
+function stopSimulation() { if (simInterval) { clearInterval(simInterval); simInterval = null; } }
+
+function connectBackend() {
+  if (window.__NO_BACKEND || typeof io === 'undefined') {
+    startSimulation(); return;
+  }
+  const socket = io('http://' + location.hostname + ':5000', { reconnection: true, reconnectionDelay: 2000, transports: ['websocket', 'polling'] });
+  window.socket = socket;
+  socket.on('connect', () => {
+    stopSimulation(); connected = true;
+    document.getElementById('conn-dot').classList.add('live');
+    document.getElementById('conn-text').textContent = 'CONECTADO';
+    socket.emit('set_mode', { mode });
+  });
+  socket.on('disconnect', () => {
+    connected = false;
+    document.getElementById('conn-dot').classList.remove('live');
+    document.getElementById('conn-text').textContent = 'DESCONECTADO';
+    startSimulation();
+  });
+  socket.on('telemetry', data => { stopSimulation(); updateTelemetry(data); updateTechPanel(data); });
+}
+window.addEventListener('load', () => setTimeout(connectBackend, 500));
+
+/* ══ ADMIN — LOGIN ═══════════════════════════════════════════════ */
+// Contraseña del panel admin. Cámbiala aquí antes de desplegar.
+const ADMIN_PASSWORD = 'grandroot2025';
+
+let adminAbierto = false;
+
+// Parámetros actuales conocidos (se actualizan cuando el ESP32 los confirma)
+const paramsActuales = { kp: null, ki: null, sample_ms: null, pulsos_max: null };
+
+function abrirLogin() {
+  document.getElementById('admin-pwd').value = '';
+  document.getElementById('admin-error').textContent = '';
+  document.getElementById('login-overlay').classList.add('visible');
+  setTimeout(() => document.getElementById('admin-pwd').focus(), 60);
+}
+
+function cerrarLogin() {
+  document.getElementById('login-overlay').classList.remove('visible');
+}
+
+function verificarAdmin() {
+  const pwd = document.getElementById('admin-pwd').value;
+  if (pwd === ADMIN_PASSWORD) {
+    cerrarLogin();
+    abrirAdmin();
+  } else {
+    const err = document.getElementById('admin-error');
+    err.textContent = 'Contraseña incorrecta.';
+    document.getElementById('admin-pwd').value = '';
+    document.getElementById('admin-pwd').focus();
+    setTimeout(() => { err.textContent = ''; }, 2500);
+  }
+}
+
+function abrirAdmin() {
+  adminAbierto = true;
+  document.getElementById('tech-panel').classList.add('visible');
+  adminLog('info', '[ADMIN] Panel abierto.');
+}
+
+function cerrarAdmin() {
+  adminAbierto = false;
+  document.getElementById('tech-panel').classList.remove('visible');
+}
+
+/* ══ ADMIN — TELEMETRÍA EN VIVO ══════════════════════════════════ */
+function updateTechPanel(data) {
+  if (!adminAbierto) return;
+
+  // Encoder izquierdo
+  setTelVal('t-pi',   data.motor_pi,   null);
+  setTelVal('t-ri',   data.motor_ri,   null);
+  setTelVal('t-ei',   data.motor_ei !== undefined ? data.motor_ei.toFixed(1) : data.ei, null);
+  setTelVal('t-daci', data.motor_daci !== undefined ? data.motor_daci : data.daci, 'dac');
+
+  // Encoder derecho
+  setTelVal('t-pd',   data.motor_pd,   null);
+  setTelVal('t-rd',   data.motor_rd,   null);
+  setTelVal('t-ed',   data.motor_ed !== undefined ? data.motor_ed.toFixed(1) : data.ed, null);
+  setTelVal('t-dacd', data.motor_dacd !== undefined ? data.motor_dacd : data.dacd, 'dac');
+
+  // Parámetros actuales si vienen en los datos
+  if (data.kp        !== undefined) { paramsActuales.kp        = data.kp;        document.getElementById('pc-kp').textContent     = data.kp; }
+  if (data.ki        !== undefined) { paramsActuales.ki        = data.ki;        document.getElementById('pc-ki').textContent     = data.ki; }
+  if (data.sample_ms !== undefined) { paramsActuales.sample_ms = data.sample_ms; document.getElementById('pc-sample').textContent = data.sample_ms + ' ms'; }
+  if (data.pulsos_max!== undefined) { paramsActuales.pulsos_max= data.pulsos_max;document.getElementById('pc-pulsos').textContent = data.pulsos_max; }
+}
+
+function setTelVal(id, val, tipo) {
+  const el = document.getElementById(id);
+  if (!el || val === undefined || val === null) return;
+  el.textContent = val;
+  // Colorear DAC según nivel (0-255)
+  if (tipo === 'dac') {
+    const n = Number(val);
+    el.className = 'tel-cell-value ' + (n === 0 ? '' : n < 80 ? 'warn' : n > 220 ? 'bad' : 'good');
+  }
+  // Error: verde si pequeño, amarillo si medio, rojo si grande
+  if (id === 't-ei' || id === 't-ed') {
+    const n = Math.abs(Number(val));
+    el.className = 'tel-cell-value ' + (n < 3 ? 'good' : n < 8 ? 'warn' : 'bad');
+  }
+}
+
+/* ══ ADMIN — ENVIAR PARÁMETRO AL BACKEND ═════════════════════════ */
+function enviarParam(nombre) {
+  const inputIds = { kp: 'p-kp', ki: 'p-ki', sample_ms: 'p-sample', pulsos_max: 'p-pulsos' };
+  const val = parseFloat(document.getElementById(inputIds[nombre]).value);
+
+  if (isNaN(val) || val <= 0) {
+    adminLog('err', `[PARAM] Valor inválido para ${nombre}.`);
+    return;
+  }
+
+  const payload = { param: nombre, value: val };
+  if (window.socket) {
+    window.socket.emit('set_param', payload);
+    adminLog('warn', `[PARAM] ${nombre} = ${val} → enviado al backend.`);
+  } else {
+    adminLog('err', '[PARAM] Sin conexión al backend — no se envió.');
+  }
+
+  // Actualizar display de "Actual" optimistamente
+  const pcIds = { kp: 'pc-kp', ki: 'pc-ki', sample_ms: 'pc-sample', pulsos_max: 'pc-pulsos' };
+  document.getElementById(pcIds[nombre]).textContent =
+    nombre === 'sample_ms' ? val + ' ms' : val;
+}
+
+/* ══ ADMIN — LOG TERMINAL ════════════════════════════════════════ */
+const MAX_LOG_LINES = 120;
+
+function adminLog(tipo, mensaje) {
+  const terminal = document.getElementById('log-terminal');
+  if (!terminal) return;
+
+  const ts = new Date().toTimeString().slice(0, 8);
+  const linea = document.createElement('div');
+  linea.className = `log-line ${tipo}`;
+  linea.textContent = `${ts}  ${mensaje}`;
+  terminal.appendChild(linea);
+
+  // Limitar cantidad de líneas para no crecer infinito
+  while (terminal.children.length > MAX_LOG_LINES) {
+    terminal.removeChild(terminal.firstChild);
+  }
+
+  // Auto-scroll al fondo
+  terminal.scrollTop = terminal.scrollHeight;
+}
+
+function limpiarLog() {
+  const t = document.getElementById('log-terminal');
+  t.innerHTML = '<div class="log-line info">[SISTEMA] Log limpiado.</div>';
+}
+
+// Capturar eventos de conexión/desconexión y reflejarlos en el log
+const _origConnect    = connectBackend;
+window.__adminLogConn = (msg, tipo) => adminLog(tipo || 'info', msg);
+
+</script>
+<!-- ══ MODAL LOGIN ADMIN ══════════════════════════════════════════ -->
+<div class="overlay" id="login-overlay">
+  <div class="modal">
+    <div class="modal-title">🔒 Acceso Admin</div>
+    <input type="password" id="admin-pwd" placeholder="Contraseña"
+           onkeydown="if(event.key==='Enter') verificarAdmin()"/>
+    <div class="modal-error" id="admin-error"></div>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="cerrarLogin()">Cancelar</button>
+      <button class="modal-confirm" onclick="verificarAdmin()">Entrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ PANEL TÉCNICO ══════════════════════════════════════════════ -->
+<div class="tech-panel" id="tech-panel">
+
+  <div class="tech-header">
+    <span class="tech-header-title">⚙ Panel de administración</span>
+    <button class="tech-close" onclick="cerrarAdmin()" title="Cerrar">✕</button>
+  </div>
+
+  <div class="tech-body">
+
+    <!-- Telemetría motores en vivo -->
+    <div>
+      <div class="tech-sec-title">Telemetría — Motor Izquierdo</div>
+      <div class="tel-grid">
+        <div class="tel-cell">
+          <div class="tel-cell-label">Pulsos</div>
+          <div class="tel-cell-value" id="t-pi">—</div>
+        </div>
+        <div class="tel-cell">
+          <div class="tel-cell-label">Ref</div>
+          <div class="tel-cell-value good" id="t-ri">—</div>
+        </div>
+        <div class="tel-cell">
+          <div class="tel-cell-label">Error</div>
+          <div class="tel-cell-value" id="t-ei">—</div>
+        </div>
+        <div class="tel-cell">
+          <div class="tel-cell-label">DAC</div>
+          <div class="tel-cell-value" id="t-daci">—</div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="tech-sec-title">Telemetría — Motor Derecho</div>
+      <div class="tel-grid">
+        <div class="tel-cell">
+          <div class="tel-cell-label">Pulsos</div>
+          <div class="tel-cell-value" id="t-pd">—</div>
+        </div>
+        <div class="tel-cell">
+          <div class="tel-cell-label">Ref</div>
+          <div class="tel-cell-value good" id="t-rd">—</div>
+        </div>
+        <div class="tel-cell">
+          <div class="tel-cell-label">Error</div>
+          <div class="tel-cell-value" id="t-ed">—</div>
+        </div>
+        <div class="tel-cell">
+          <div class="tel-cell-label">DAC</div>
+          <div class="tel-cell-value" id="t-dacd">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Parámetros del controlador -->
+    <div>
+      <div class="tech-sec-title">Parámetros del controlador PI</div>
+      <div class="param-grid">
+
+        <div class="param-row">
+          <div class="param-label">Kp</div>
+          <div class="param-input-row">
+            <input class="param-input" type="number" id="p-kp" step="0.5" min="0" placeholder="6.0"/>
+            <button class="param-apply" onclick="enviarParam('kp')">Aplicar</button>
+          </div>
+          <div class="param-current">Actual: <span id="pc-kp">—</span></div>
+        </div>
+
+        <div class="param-row">
+          <div class="param-label">Ki</div>
+          <div class="param-input-row">
+            <input class="param-input" type="number" id="p-ki" step="0.5" min="0" placeholder="3.0"/>
+            <button class="param-apply" onclick="enviarParam('ki')">Aplicar</button>
+          </div>
+          <div class="param-current">Actual: <span id="pc-ki">—</span></div>
+        </div>
+
+        <div class="param-row">
+          <div class="param-label">Sample Time (ms)</div>
+          <div class="param-input-row">
+            <input class="param-input" type="number" id="p-sample" step="50" min="50" placeholder="200"/>
+            <button class="param-apply" onclick="enviarParam('sample_ms')">Aplicar</button>
+          </div>
+          <div class="param-current">Actual: <span id="pc-sample">—</span></div>
+        </div>
+
+        <div class="param-row">
+          <div class="param-label">Pulsos Max</div>
+          <div class="param-input-row">
+            <input class="param-input" type="number" id="p-pulsos" step="1" min="1" placeholder="22"/>
+            <button class="param-apply" onclick="enviarParam('pulsos_max')">Aplicar</button>
+          </div>
+          <div class="param-current">Actual: <span id="pc-pulsos">—</span></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Log en tiempo real -->
+    <div>
+      <div class="tech-sec-title" style="display:flex;align-items:center;gap:8px;">
+        Log del sistema
+        <button onclick="limpiarLog()"
+          style="font-size:9px;font-weight:800;letter-spacing:0.8px;text-transform:uppercase;
+                 background:transparent;border:1px solid var(--border);color:var(--text-dim);
+                 border-radius:3px;padding:2px 7px;cursor:pointer;">
+          Limpiar
+        </button>
+      </div>
+      <div class="log-terminal" id="log-terminal">
+        <div class="log-line info">[SISTEMA] Panel admin cargado.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>
