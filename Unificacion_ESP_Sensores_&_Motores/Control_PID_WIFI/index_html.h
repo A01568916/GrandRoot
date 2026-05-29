@@ -1878,15 +1878,14 @@ function tileToCache(key, blob) {
 /* ── Capa Leaflet personalizada con caché IndexedDB ─────────────── */
 /*
  * Estrategia:
- *  1. Si el tile está en IndexedDB, lo servimos desde ahí (offline OK).
- *  2. Si no está, dejamos que el navegador lo cargue normalmente
- *     (la <img> hace su petición sin pasar por fetch — eso evita
- *     muchos problemas de CORS porque las <img> no requieren CORS
- *     para mostrarse, solo para usar `canvas.toDataURL` o similar).
- *  3. Cuando la <img> carga OK, la copiamos al caché usando un
- *     XMLHttpRequest con responseType='blob' contra la misma URL.
- *     Si esa petición falla por CORS, el tile sigue mostrándose
- *     (solo no se cachea).
+ *  - Si el tile está en IndexedDB, lo servimos desde ahí (offline OK).
+ *  - Si NO está y hay internet, lo descargamos por XHR, lo cacheamos
+ *    y lo servimos como blob.
+ *  - Si NO está y NO hay internet, mostramos un placeholder gris.
+ *
+ * Importante: NO usamos <img> con src directo a URL pública, porque
+ * cuando no hay internet eso genera cientos de errores en la consola
+ * y satura el navegador (puede bloquear el WebSocket también).
  */
 const CachedTileLayer = L.TileLayer.extend({
 
@@ -1898,52 +1897,53 @@ const CachedTileLayer = L.TileLayer.extend({
     tile.alt = '';
     tile.setAttribute('role', 'presentation');
 
+    const placeholder = () => {
+      tile.src =
+        'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256">' +
+        '<rect width="256" height="256" fill="%23111318"/>' +
+        '<text x="128" y="128" fill="%232a3040" font-family="monospace" font-size="11" text-anchor="middle">' +
+        'sin internet</text></svg>';
+      done(null, tile);
+    };
+
     // 1) Intentar caché primero
     tileFromCache(key).then(blob => {
       if (blob) {
-        // Servimos desde caché — no toca la red
         tile.src = URL.createObjectURL(blob);
         tile.onload = () => done(null, tile);
         return;
       }
 
-      // 2) Cargar desde red usando <img> (no fetch)
-      tile.onload = () => {
-        done(null, tile);
-        // 3) Intentar guardar en caché en segundo plano
-        //    Si CORS lo bloquea, no pasa nada — el tile ya se vio.
-        this._cachearTile(url, key);
-      };
-      tile.onerror = () => {
-        // Sin red y sin caché → placeholder
-        tile.src =
-          'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256">' +
-          '<rect width="256" height="256" fill="%23111318"/>' +
-          '<text x="128" y="128" fill="%232a3040" font-family="monospace" font-size="11" text-anchor="middle">' +
-          'sin tile</text></svg>';
-        done(null, tile);
-      };
-      tile.src = url;
+      // 2) Si no hay caché y NO hay internet → placeholder, no tocar la red
+      if (!mapOnline) {
+        placeholder();
+        return;
+      }
+
+      // 3) Hay internet → descargar por XHR, cachear, servir como blob
+      try {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.responseType = 'blob';
+        xhr.timeout = 6000;
+        xhr.onload = () => {
+          if (xhr.status === 200 && xhr.response) {
+            tileToCache(key, xhr.response);
+            tile.src = URL.createObjectURL(xhr.response);
+            tile.onload = () => done(null, tile);
+          } else {
+            placeholder();
+          }
+        };
+        xhr.onerror = placeholder;
+        xhr.ontimeout = placeholder;
+        xhr.send();
+      } catch (e) {
+        placeholder();
+      }
     });
 
     return tile;
-  },
-
-  _cachearTile(url, key) {
-    // XHR para obtener el blob — los providers correctos (ArcGIS, CartoDB)
-    // mandan CORS habilitado. Si falla, ignoramos silenciosamente.
-    try {
-      const xhr = new XMLHttpRequest();
-      xhr.open('GET', url, true);
-      xhr.responseType = 'blob';
-      xhr.onload = () => {
-        if (xhr.status === 200 && xhr.response) {
-          tileToCache(key, xhr.response);
-        }
-      };
-      xhr.onerror = () => {};
-      xhr.send();
-    } catch (e) { /* silencioso */ }
   }
 });
 
@@ -2025,8 +2025,13 @@ openTileDB().then(db => {
   cambiarProvider('sat');
 });
 
-/* ── Indicador online/offline (silencioso, sin tocar tiles) ──── */
-let mapOnline = true;
+/* ── Indicador online/offline ─────────────────────────────────
+ * Empezamos asumiendo OFFLINE (caso más común conectado al ESP32-Robot).
+ * Solo activamos modo online si una prueba a internet tiene éxito.
+ * Esto evita inundar la consola con errores y permite que el WebSocket
+ * al ESP32 no compita con cientos de requests fallidos.
+ */
+let mapOnline = false;
 function setMapMode(online) {
   mapOnline = online;
   const btn = document.getElementById('map-mode-btn');
@@ -2039,19 +2044,28 @@ function setMapMode(online) {
     btn.classList.add('offline');
   }
 }
+setMapMode(false);
 
-// Detección de conectividad
+// Detección silenciosa de conectividad — sin spamear errores
 function checkOnline() {
-  // Una imagen 1x1 de un CDN confiable
-  const img = new Image();
-  let done = false;
-  const t = setTimeout(() => { if (!done) { done = true; setMapMode(false); } }, 3500);
-  img.onload  = () => { if (!done) { done = true; clearTimeout(t); setMapMode(true);  } };
-  img.onerror = () => { if (!done) { done = true; clearTimeout(t); setMapMode(false); } };
-  img.src = 'https://server.arcgisonline.com/favicon.ico?_=' + Date.now();
+  if (!navigator.onLine) {
+    // El navegador confirma que NO hay internet — confiamos en él
+    setMapMode(false);
+    return;
+  }
+  // navigator.onLine puede dar falsos positivos (dice online cuando
+  // estás conectado al AP del ESP32). Hacemos un test real con timeout
+  // corto. Si falla, no se queja en consola porque usamos catch silencioso.
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 2500);
+  fetch('https://server.arcgisonline.com/favicon.ico?_=' + Date.now(),
+        { mode: 'no-cors', signal: ctrl.signal, cache: 'no-cache' })
+    .then(() => { clearTimeout(t); setMapMode(true); })
+    .catch(() => { clearTimeout(t); setMapMode(false); });
 }
-checkOnline();
-setInterval(checkOnline, 30000);
+// Esperar a que el WS conecte primero — el mapa no es prioritario.
+setTimeout(checkOnline, 2000);
+setInterval(checkOnline, 60000);
 
 /* ── Marcador del robot + trayectoria ─────────────────────────── */
 const robotIcon = L.divIcon({

@@ -430,6 +430,16 @@ void setup() {
     request->send(response);
   });
 
+  // Favicon vacío para evitar 404 spammeando la consola del navegador
+  server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(204);
+  });
+
+  // Handler para cualquier otra ruta — responde 404 limpio sin spam
+  server.onNotFound([](AsyncWebServerRequest *request) {
+    request->send(404, "text/plain", "Not Found");
+  });
+
   server.begin();
   Serial.println("[HTTP] Servidor listo en http://192.168.4.1");
 
